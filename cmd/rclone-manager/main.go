@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/kevindiu/rclone-manager/internal/api"
 	"github.com/kevindiu/rclone-manager/internal/config"
@@ -46,12 +47,20 @@ func newLogger(levelStr, formatStr string) *slog.Logger {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
-		if err := runResetPasswordCLI(os.Args[2:]); err != nil {
-			slog.Error("reset-password failed", "error", err)
-			os.Exit(1)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "reset-password":
+			if err := runResetPasswordCLI(os.Args[2:]); err != nil {
+				slog.Error("reset-password failed", "error", err)
+				os.Exit(1)
+			}
+			return
+		case "healthcheck":
+			if err := runHealthcheckCLI(); err != nil {
+				os.Exit(1)
+			}
+			return
 		}
-		return
 	}
 
 	cfg, err := config.Load()
@@ -203,5 +212,22 @@ func runResetPasswordCLI(args []string) error {
 		return err
 	}
 	fmt.Printf("Password updated for user %q; all active sessions revoked.\n", user.Username)
+	return nil
+}
+
+func runHealthcheckCLI() error {
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/api/health")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthcheck returned HTTP %d", resp.StatusCode)
+	}
 	return nil
 }

@@ -8,7 +8,7 @@ Repository guide and engineering standards for AI coding agents working on `rclo
 
 - **Backend**: Go `1.27` (`CGO_ENABLED=0`), standard library `net/http` + `log/slog`, pure-Go SQLite (`modernc.org/sqlite`), cron scheduler (`github.com/robfig/cron/v3`), YAML/JSON config export (`gopkg.in/yaml.v3`).
 - **Frontend**: React `19.3`, TypeScript `~7.0`, Vite `8.4`, Tailwind CSS `4.3`, Lucide icons, Biome `2.6`, embedded into the Go binary via `web/embed.go`.
-- **Container**: Multi-stage, multi-arch (`linux/amd64` + `linux/arm64`) Alpine `3.24` image running as non-root `app` (`uid=1000:gid=1000`), copying a pinned `rclone` binary (`ARG RCLONE_VERSION=1.76.0`).
+- **Container**: Multi-stage, multi-arch (`linux/amd64` + `linux/arm64`) minimal `scratch` runtime image running as non-root `1000:1000`, built on pinned `golang:1.27-alpine` and `node:26-alpine` builders with a pinned `rclone` binary (`ARG RCLONE_VERSION=1.76.0`).
 
 ---
 
@@ -82,8 +82,8 @@ Follow these invariants whenever modifying or adding features:
 - Keep `web/src/` passing `npm run lint` (Biome) and `npm run build` (`tsc -b && vite build`) with zero warnings/errors.
 
 ### 6. Docker & Supply Chain
-- **Never use floating `:latest` tags** in `Dockerfile` or CI workflows; pin explicit versions (`ARG RCLONE_VERSION=1.76.0`, `golang:1.27-alpine`, `node:26-alpine`, `alpine:3.24`) and verify downloaded binaries against checksums in CI.
-- Keep the runtime container running as non-root `USER app` (`1000:1000`).
+- **Never use floating `:latest` tags** in `Dockerfile` or CI workflows; pin explicit versions (`ARG RCLONE_VERSION=1.76.0`, `golang:1.27-alpine`, `node:26-alpine`) and verify downloaded binaries against checksums in CI.
+- Keep the runtime container (`FROM scratch`) running as non-root `USER 1000:1000`.
 
 ---
 
