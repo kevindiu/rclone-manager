@@ -1,5 +1,5 @@
 import { Loader2, Upload } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
 
@@ -11,14 +11,42 @@ export function ImportConfModal({
   onClose: () => void;
 }) {
   const [content, setContent] = useState('');
+  const [loadedFileName, setLoadedFileName] = useState('');
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadConfigFile = async (file: File) => {
+    setError('');
+    try {
+      const text = await file.text();
+      setContent(text);
+      setLoadedFileName(file.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to read selected file');
+    }
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
-    setContent(await file.text());
+    try {
+      await loadConfigFile(file);
+    } finally {
+      input.value = '';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      void loadConfigFile(file);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,11 +98,27 @@ export function ImportConfModal({
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 cursor-pointer">
-            <Upload className="w-3.5 h-3.5 text-sky-400" />
-            Load rclone.conf file
-            <input type="file" accept=".conf,.ini,.txt" onChange={handleFile} className="hidden" />
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={(e) => void handleFile(e)}
+              className="sr-only"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-sky-400" />
+              Load rclone.conf file
+            </button>
+            {loadedFileName && (
+              <span className="text-[11px] font-mono text-emerald-400 truncate max-w-[180px]">
+                {loadedFileName}
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-3 text-xs text-slate-300">
             <label className="inline-flex items-center gap-1.5 cursor-pointer">
@@ -98,13 +142,25 @@ export function ImportConfModal({
           </div>
         </div>
 
-        <textarea
-          rows={10}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder={`[myremote]\ntype = s3\nprovider = Cloudflare\n...`}
-          className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
-        />
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          className={`rounded-xl transition-colors ${
+            dragging ? 'ring-2 ring-sky-500 bg-sky-500/5' : ''
+          }`}
+        >
+          <textarea
+            rows={10}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder={`Paste or drop rclone.conf here, e.g.:\n[myremote]\ntype = s3\nprovider = Cloudflare\n...`}
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+          />
+        </div>
       </form>
     </Modal>
   );

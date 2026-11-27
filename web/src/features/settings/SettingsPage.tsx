@@ -1,5 +1,5 @@
 import { Bell, Download, KeyRound, Loader2, Save, Send, Server, Upload } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { AuthUser, GlobalSettings, SystemInfo } from '../../types/api';
 import { COMMON_TIMEZONES } from '../../utils/format';
@@ -22,6 +22,7 @@ export function SettingsPage({
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
+  const configFileRef = useRef<HTMLInputElement | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -383,20 +384,25 @@ export function SettingsPage({
             </label>
           </div>
 
-          <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 cursor-pointer">
+          <input
+            ref={configFileRef}
+            type="file"
+            onChange={(e) => void handleImportFile(e)}
+            className="sr-only"
+          />
+          <button
+            type="button"
+            disabled={importing}
+            onClick={() => configFileRef.current?.click()}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 cursor-pointer disabled:opacity-50"
+          >
             {importing ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Upload className="w-3.5 h-3.5" />
             )}
             Import JSON / YAML File
-            <input
-              type="file"
-              accept=".json,.yaml,.yml"
-              onChange={handleImportFile}
-              className="hidden"
-            />
-          </label>
+          </button>
         </div>
       </div>
 
