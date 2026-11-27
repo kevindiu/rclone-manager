@@ -10,6 +10,16 @@ import (
 	"github.com/kevindiu/rclone-manager/internal/rclone"
 )
 
+const localBrowseRoot = "/"
+
+func isWithinBase(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
 // ListLocalDirs lists subdirectories inside an absolute local filesystem path.
 // Regular files are omitted because backup sources, destinations, and restore
 // targets in PathPickerModal operate on directories.
@@ -23,7 +33,19 @@ func (s *AppService) ListLocalDirs(dirPath string) (string, []rclone.BrowseEntry
 	}
 	clean := filepath.Clean(trimmed)
 
-	entries, err := os.ReadDir(clean)
+	baseAbs, err := filepath.Abs(localBrowseRoot)
+	if err != nil {
+		return "", nil, err
+	}
+	cleanAbs, err := filepath.Abs(clean)
+	if err != nil {
+		return "", nil, err
+	}
+	if !isWithinBase(baseAbs, cleanAbs) {
+		return "", nil, fmt.Errorf("%w: local path escapes allowed browse root", ErrValidation)
+	}
+
+	entries, err := os.ReadDir(cleanAbs)
 	if err != nil {
 		return "", nil, err
 	}
@@ -33,7 +55,7 @@ func (s *AppService) ListLocalDirs(dirPath string) (string, []rclone.BrowseEntry
 		name := de.Name()
 		isDir := de.IsDir()
 		if !isDir && (de.Type()&os.ModeSymlink) != 0 {
-			if info, statErr := os.Stat(filepath.Join(clean, name)); statErr == nil && info.IsDir() {
+			if info, statErr := os.Stat(filepath.Join(cleanAbs, name)); statErr == nil && info.IsDir() {
 				isDir = true
 			}
 		}
@@ -41,7 +63,7 @@ func (s *AppService) ListLocalDirs(dirPath string) (string, []rclone.BrowseEntry
 			continue
 		}
 		dirs = append(dirs, rclone.BrowseEntry{
-			Path:  filepath.Join(clean, name),
+			Path:  filepath.Join(cleanAbs, name),
 			Name:  name,
 			IsDir: true,
 		})
@@ -55,5 +77,5 @@ func (s *AppService) ListLocalDirs(dirPath string) (string, []rclone.BrowseEntry
 		}
 		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
 	})
-	return clean, dirs, nil
+	return cleanAbs, dirs, nil
 }
