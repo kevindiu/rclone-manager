@@ -16,7 +16,7 @@ import (
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.svc.GetSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "get settings failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
@@ -35,7 +35,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "update settings failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -49,14 +49,14 @@ func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 
 	bundle, err := s.svc.ExportBundle(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "export bundle failed", err)
 		return
 	}
 
 	if format == "yaml" || format == "yml" {
 		data, err := yaml.Marshal(bundle)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "marshal yaml export failed", err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
@@ -68,7 +68,7 @@ func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 
 	data, err := json.MarshalIndent(bundle, "", "  ")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "marshal json export failed", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -96,16 +96,7 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 
 	var bundle domain.ExportBundle
 	if strings.HasPrefix(trimmed, "{") {
-		var wrapped struct {
-			Mode   string               `json:"mode"`
-			Bundle *domain.ExportBundle `json:"bundle"`
-		}
-		if err := json.Unmarshal([]byte(trimmed), &wrapped); err == nil && wrapped.Bundle != nil {
-			bundle = *wrapped.Bundle
-			if wrapped.Mode != "" {
-				mode = wrapped.Mode
-			}
-		} else if err := json.Unmarshal([]byte(trimmed), &bundle); err != nil {
+		if err := json.Unmarshal([]byte(trimmed), &bundle); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON bundle: "+err.Error())
 			return
 		}
@@ -120,7 +111,7 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "import bundle failed", err)
 		return
 	}
 

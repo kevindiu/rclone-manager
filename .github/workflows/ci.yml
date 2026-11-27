@@ -30,6 +30,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   backend:
@@ -51,7 +52,7 @@ jobs:
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: v2
       - run: go test -race -v ./...
 
   docker:

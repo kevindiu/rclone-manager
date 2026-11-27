@@ -191,29 +191,32 @@ func MergeOrValidateINI(ctx context.Context, rcloneBin, existingConfPath, incomi
 
 	var finalSections []INISection
 	if mode == "merge" {
-		if rawExisting, err := os.ReadFile(existingConfPath); err == nil && len(bytes.TrimSpace(rawExisting)) > 0 {
+		rawExisting, err := os.ReadFile(existingConfPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("read existing rclone.conf before merge: %w", err)
+		}
+		if len(bytes.TrimSpace(rawExisting)) > 0 {
 			existingSections, parseErr := ParseINI(string(rawExisting))
-			if parseErr == nil {
-				incomingByName := make(map[string]INISection, len(incomingSections))
-				for _, s := range incomingSections {
-					incomingByName[s.Name] = s
+			if parseErr != nil {
+				return nil, fmt.Errorf("failed to parse existing rclone.conf before merge: %w", parseErr)
+			}
+			incomingByName := make(map[string]INISection, len(incomingSections))
+			for _, s := range incomingSections {
+				incomingByName[s.Name] = s
+			}
+			seen := make(map[string]bool, len(incomingSections))
+			for _, s := range existingSections {
+				if repl, ok := incomingByName[s.Name]; ok {
+					finalSections = append(finalSections, repl)
+					seen[s.Name] = true
+				} else {
+					finalSections = append(finalSections, s)
 				}
-				seen := make(map[string]bool, len(incomingSections))
-				for _, s := range existingSections {
-					if repl, ok := incomingByName[s.Name]; ok {
-						finalSections = append(finalSections, repl)
-						seen[s.Name] = true
-					} else {
-						finalSections = append(finalSections, s)
-					}
+			}
+			for _, s := range incomingSections {
+				if !seen[s.Name] {
+					finalSections = append(finalSections, s)
 				}
-				for _, s := range incomingSections {
-					if !seen[s.Name] {
-						finalSections = append(finalSections, s)
-					}
-				}
-			} else {
-				finalSections = incomingSections
 			}
 		} else {
 			finalSections = incomingSections

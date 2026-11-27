@@ -16,6 +16,11 @@ type Client struct {
 	confPath string
 	confMu   sync.Mutex
 
+	verMu     sync.Mutex
+	verCached bool
+	version   string
+	osArch    string
+
 	provMu    sync.Mutex
 	providers []ProviderInfo
 }
@@ -41,8 +46,15 @@ func (c *Client) ConfPath() string {
 	return c.confPath
 }
 
-// Version returns the installed rclone version metadata.
+// Version returns the installed rclone version metadata (cached after first successful call).
 func (c *Client) Version(ctx context.Context) (version string, osArch string, err error) {
+	c.verMu.Lock()
+	defer c.verMu.Unlock()
+
+	if c.verCached {
+		return c.version, c.osArch, nil
+	}
+
 	cmd := exec.CommandContext(ctx, c.bin, "version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -72,19 +84,23 @@ func (c *Client) Version(ctx context.Context) (version string, osArch string, er
 	} else if archPart != "" {
 		osArch = archPart
 	}
+
+	c.version = version
+	c.osArch = osArch
+	c.verCached = true
 	return version, osArch, nil
 }
 
 // Providers returns all supported rclone providers and their option schemas (cached).
 func (c *Client) Providers(ctx context.Context) ([]ProviderInfo, error) {
 	c.provMu.Lock()
+	defer c.provMu.Unlock()
+
 	if len(c.providers) > 0 {
 		cached := make([]ProviderInfo, len(c.providers))
 		copy(cached, c.providers)
-		c.provMu.Unlock()
 		return cached, nil
 	}
-	c.provMu.Unlock()
 
 	cmd := exec.CommandContext(ctx, c.bin, "config", "providers")
 	var stdout, stderr bytes.Buffer
@@ -107,9 +123,7 @@ func (c *Client) Providers(ctx context.Context) ([]ProviderInfo, error) {
 		}
 	}
 
-	c.provMu.Lock()
 	c.providers = parsed
-	c.provMu.Unlock()
 
 	out := make([]ProviderInfo, len(parsed))
 	copy(out, parsed)

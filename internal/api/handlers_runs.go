@@ -22,7 +22,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 
 	runs, total, err := s.svc.ListRuns(r.Context(), jobID, status, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "list runs failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -39,7 +39,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "get run failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
@@ -55,7 +55,7 @@ func (s *Server) handleGetRunLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "get run log path failed", err)
 			return
 		}
 
@@ -80,14 +80,14 @@ func (s *Server) handleGetRunLogs(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "open run log file failed", err)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		info, err := f.Stat()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "stat run log file failed", err)
 			return
 		}
 		http.ServeContent(w, r, filename, info.ModTime(), f)
@@ -101,7 +101,7 @@ func (s *Server) handleGetRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "read run logs failed", err)
 		return
 	}
 
@@ -126,7 +126,7 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "delete run failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

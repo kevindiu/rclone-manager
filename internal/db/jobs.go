@@ -2,9 +2,7 @@ package db
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,22 +14,13 @@ import (
 // ErrNotFound is returned when a requested entity does not exist.
 var ErrNotFound = errors.New("not found")
 
-// NewID generates a random hex identifier.
-func NewID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
-}
-
 // ListJobs returns all configured jobs sorted by creation time ascending, then name.
 func (s *Store) ListJobs(ctx context.Context) ([]domain.Job, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT data FROM jobs ORDER BY created_at ASC, name ASC`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	jobs := make([]domain.Job, 0)
 	for rows.Next() {
@@ -69,7 +58,7 @@ func (s *Store) GetJob(ctx context.Context, id string) (*domain.Job, error) {
 func (s *Store) CreateJob(ctx context.Context, job domain.Job) (*domain.Job, error) {
 	now := time.Now().UTC()
 	if job.ID == "" {
-		job.ID = NewID()
+		job.ID = domain.NewID()
 	}
 	if job.CreatedAt.IsZero() {
 		job.CreatedAt = now
@@ -174,7 +163,7 @@ ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.update
 
 	for _, job := range bundle.Jobs {
 		if job.ID == "" {
-			job.ID = NewID()
+			job.ID = domain.NewID()
 		}
 		if job.CreatedAt.IsZero() {
 			job.CreatedAt = now

@@ -15,7 +15,7 @@ import (
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.svc.ListJobs(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "list jobs failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, jobs)
@@ -29,7 +29,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "get job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
@@ -47,7 +47,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "create job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
@@ -70,7 +70,7 @@ func (s *Server) handleUpdateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "update job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -88,7 +88,7 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "delete job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -102,7 +102,7 @@ func (s *Server) handleCloneJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "clone job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
@@ -116,7 +116,7 @@ func (s *Server) handleToggleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "toggle job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -128,10 +128,10 @@ func (s *Server) handleRunJob(w http.ResponseWriter, r *http.Request) {
 		DryRun bool `json:"dry_run"`
 	}
 	if r.ContentLength > 0 {
-		_ = decodeJSON(r, &req)
-	}
-	if r.URL.Query().Get("dry_run") == "true" {
-		req.DryRun = true
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+			return
+		}
 	}
 
 	run, err := s.svc.RunJob(r.Context(), id, req.DryRun)
@@ -144,7 +144,7 @@ func (s *Server) handleRunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "run job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)
@@ -156,7 +156,7 @@ func (s *Server) handleStopJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "stop job failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})

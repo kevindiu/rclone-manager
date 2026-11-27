@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kevindiu/rclone-manager/internal/db"
 	"github.com/kevindiu/rclone-manager/internal/domain"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
 )
@@ -117,7 +116,7 @@ func (r *Runner) StartJob(job domain.Job, trigger string, dryRun bool) (*domain.
 		r.mu.Unlock()
 		if trigger == "schedule" {
 			skippedRun := domain.JobRun{
-				ID:           db.NewID(),
+				ID:           domain.NewID(),
 				JobID:        job.ID,
 				JobName:      job.Name,
 				Trigger:      trigger,
@@ -135,7 +134,7 @@ func (r *Runner) StartJob(job domain.Job, trigger string, dryRun bool) (*domain.
 		return nil, ErrJobAlreadyRunning
 	}
 
-	runID := db.NewID()
+	runID := domain.NewID()
 	logPath := filepath.Join(r.logDir, runID+".log")
 	run := domain.JobRun{
 		ID:        runID,

@@ -22,10 +22,7 @@ func formatSQLiteTime(t time.Time) string {
 }
 
 func parseSQLiteTime(raw string) (time.Time, error) {
-	if t, err := time.Parse(sqliteTimeFormat, raw); err == nil {
-		return t, nil
-	}
-	return time.Parse(time.RFC3339Nano, raw)
+	return time.Parse(sqliteTimeFormat, raw)
 }
 
 // CountUsers returns the total number of persisted user accounts.
@@ -57,7 +54,7 @@ func (s *Store) CreateInitialUser(ctx context.Context, username, passwordHash st
 	now := time.Now().UTC()
 	nowStr := formatSQLiteTime(now)
 	user := domain.User{
-		ID:           NewID(),
+		ID:           domain.NewID(),
 		Username:     username,
 		PasswordHash: passwordHash,
 		CreatedAt:    now,

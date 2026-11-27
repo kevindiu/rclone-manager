@@ -114,4 +114,21 @@ remote = /tmp/alias
 	if strings.Contains(string(replaced), "[local1]") {
 		t.Fatalf("replace mode kept old section:\n%s", string(replaced))
 	}
+
+	// Corrupt existing config must cause merge mode to fail without overwriting the file.
+	corruptPath := filepath.Join(dir, "corrupt.conf")
+	corruptData := "not-an-ini-section-without-header\n"
+	if err := os.WriteFile(corruptPath, []byte(corruptData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MergeOrValidateINI(context.Background(), "rclone", corruptPath, incoming, "merge"); err == nil {
+		t.Fatal("expected error merging into corrupt existing rclone.conf, got nil")
+	}
+	afterCorrupt, err := os.ReadFile(corruptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterCorrupt) != corruptData {
+		t.Fatalf("corrupt file was unexpectedly overwritten: %q", string(afterCorrupt))
+	}
 }

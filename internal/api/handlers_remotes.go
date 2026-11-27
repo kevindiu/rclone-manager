@@ -5,12 +5,13 @@ import (
 	"net/http"
 
 	"github.com/kevindiu/rclone-manager/internal/rclone"
+	"github.com/kevindiu/rclone-manager/internal/service"
 )
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	provs, err := s.client.Providers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "list providers failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, provs)
@@ -19,7 +20,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListRemotes(w http.ResponseWriter, r *http.Request) {
 	remotes, err := s.client.ListRemotes(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "list remotes failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, remotes)
@@ -68,9 +69,12 @@ func (s *Server) handleUpdateRemote(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteRemote(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.client.DeleteRemote(r.Context(), name); err != nil {
+	if err := s.svc.DeleteRemote(r.Context(), name); err != nil {
 		status := http.StatusBadRequest
-		if errors.Is(err, rclone.ErrRemoteNotFound) {
+		switch {
+		case errors.Is(err, service.ErrConflict):
+			status = http.StatusConflict
+		case errors.Is(err, rclone.ErrRemoteNotFound):
 			status = http.StatusNotFound
 		}
 		writeError(w, status, err.Error())
@@ -106,8 +110,12 @@ func (s *Server) handleImportConf(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTestRemote(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	res, err := s.client.TestRemote(r.Context(), name)
-	if errors.Is(err, rclone.ErrRemoteNotFound) {
-		writeError(w, http.StatusNotFound, err.Error())
+	if err != nil {
+		if errors.Is(err, rclone.ErrRemoteNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		s.writeInternalError(w, r, "test remote failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -116,8 +124,12 @@ func (s *Server) handleTestRemote(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAboutRemote(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	res, err := s.client.AboutRemote(r.Context(), name)
-	if errors.Is(err, rclone.ErrRemoteNotFound) {
-		writeError(w, http.StatusNotFound, err.Error())
+	if err != nil {
+		if errors.Is(err, rclone.ErrRemoteNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		s.writeInternalError(w, r, "about remote failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)

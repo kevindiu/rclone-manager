@@ -8,6 +8,7 @@ import (
 )
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	rawToken := sessionTokenFromRequest(r)
 	rc := http.NewResponseController(w)
 	// Disable HTTP write timeout for long-lived SSE streams.
 	_ = rc.SetWriteDeadline(time.Time{})
@@ -53,6 +54,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-heartbeat.C:
+			if s.auth != nil {
+				if _, _, err := s.auth.Authenticate(r.Context(), rawToken); err != nil {
+					return
+				}
+			}
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return
 			}

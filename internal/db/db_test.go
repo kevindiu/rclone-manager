@@ -58,7 +58,7 @@ func TestMigrationsIdempotentAndVersioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen failed: %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 	if err := s2.db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
 		t.Fatal(err)
 	}

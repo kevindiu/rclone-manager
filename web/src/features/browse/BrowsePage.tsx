@@ -8,11 +8,10 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Square,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
-import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ActiveRunCard } from '../../components/ui/ActiveRunCard';
 import type {
   ActiveRunSnapshot,
   BrowseEntry,
@@ -20,7 +19,7 @@ import type {
   JobWithStatus,
   RemoteInfo,
 } from '../../types/api';
-import { formatBytes, formatDateTime, formatETA, formatSpeed } from '../../utils/format';
+import { formatBytes, formatDateTime } from '../../utils/format';
 import { RestoreModal } from './RestoreModal';
 import { VersionHistoryModal } from './VersionHistoryModal';
 
@@ -111,48 +110,14 @@ export function BrowsePage({
     <div className="space-y-4">
       {activeRestores.length > 0 && (
         <div className="space-y-2.5">
-          {activeRestores.map((run) => {
-            const p = run.progress;
-            const pct = Math.min(100, Math.max(0, p?.percentage ?? 0));
-            return (
-              <div
-                key={run.run_id}
-                className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-lg space-y-2.5"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-semibold text-sm text-slate-100 truncate">
-                      {run.job_name}
-                    </span>
-                    <StatusBadge status={run.status} dryRun={run.dry_run} />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void api.stopJob(run.job_id)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30"
-                  >
-                    <Square className="w-3 h-3 fill-current" />
-                    Stop
-                  </button>
-                </div>
-                <div className="flex flex-wrap items-center justify-between text-xs text-slate-300 tabular-nums gap-2">
-                  <span>
-                    {formatBytes(p?.bytes)} / {formatBytes(p?.total_bytes)} ({pct.toFixed(1)}%)
-                  </span>
-                  <span className="flex items-center gap-3">
-                    <span className="text-emerald-400 font-medium">{formatSpeed(p?.speed)}</span>
-                    <span className="text-slate-400">ETA: {formatETA(p?.eta)}</span>
-                  </span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
+          {activeRestores.map((run) => (
+            <ActiveRunCard
+              key={run.run_id}
+              run={run}
+              variant="restore"
+              onStop={(jobId) => void api.stopJob(jobId)}
+            />
+          ))}
         </div>
       )}
 

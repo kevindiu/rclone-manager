@@ -5,7 +5,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"mime"
 	"net/http"
 	"path"
 	"runtime/debug"
@@ -31,6 +30,7 @@ type Server struct {
 	spaFS      fs.FS
 	appVersion string
 	startedAt  time.Time
+	csrf       *http.CrossOriginProtection
 	mux        *http.ServeMux
 }
 
@@ -49,6 +49,15 @@ func NewServer(
 	if logger == nil {
 		logger = slog.Default()
 	}
+	csrf := http.NewCrossOriginProtection()
+	for _, origin := range cfg.CORSOrigins {
+		if origin == "*" {
+			continue
+		}
+		if err := csrf.AddTrustedOrigin(origin); err != nil {
+			logger.Warn("ignoring invalid trusted CORS origin for CSRF protection", "origin", origin, "error", err)
+		}
+	}
 	s := &Server{
 		cfg:        cfg,
 		svc:        svc,
@@ -60,6 +69,7 @@ func NewServer(
 		spaFS:      spaFS,
 		appVersion: appVersion,
 		startedAt:  time.Now().UTC(),
+		csrf:       csrf,
 		mux:        http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -190,6 +200,15 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Cross-site request forgery protection for state-changing browser API requests.
+		cleanedPath := path.Clean("/" + r.URL.Path)
+		if (cleanedPath == "/api" || strings.HasPrefix(cleanedPath, "/api/")) && s.csrf != nil {
+			if err := s.csrf.Check(r); err != nil {
+				writeError(rec, http.StatusForbidden, "cross-origin request blocked")
+				return
+			}
+		}
+
 		// Mandatory session cookie enforcement for all protected /api/* routes.
 		if !isPublicPath(r.URL.Path) {
 			if s.auth == nil {
@@ -283,20 +302,11 @@ func serveEmbeddedFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name 
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	rs, ok := f.(io.ReadSeeker)
 	if !ok {
-		data, err := io.ReadAll(f)
-		if err != nil {
-			return false
-		}
-		if ctype := mime.TypeByExtension(path.Ext(name)); ctype != "" {
-			w.Header().Set("Content-Type", ctype)
-		}
-		setCacheHeaders(w, name)
-		_, _ = w.Write(data)
-		return true
+		return false
 	}
 
 	setCacheHeaders(w, name)
@@ -321,6 +331,11 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	s.logger.Error(msg, "method", r.Method, "path", r.URL.Path, "error", err)
+	writeError(w, http.StatusInternalServerError, "internal server error")
 }
 
 func decodeJSON(r *http.Request, dst any) error {

@@ -23,14 +23,7 @@ const (
 )
 
 // dummyEncodedHash is used to equalize CPU time when a username does not exist.
-var dummyEncodedHash = func() string {
-	h, err := HashPasswordWithIterations("dummy-password-for-timing-equalization", DefaultPBKDF2Iterations)
-	if err != nil {
-		// Deterministic fallback format in case rand.Read fails unexpectedly at init.
-		return "pbkdf2_sha256$600000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	}
-	return h
-}()
+const dummyEncodedHash = "pbkdf2_sha256$600000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 // HashPassword hashes a plaintext password with PBKDF2-HMAC-SHA256 and a random salt.
 func HashPassword(password string) (string, error) {

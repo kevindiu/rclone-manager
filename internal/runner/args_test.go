@@ -1,0 +1,171 @@
+package runner
+
+import (
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kevindiu/rclone-manager/internal/domain"
+)
+
+func containsFlagPair(args []string, flag, val string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && args[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildRcloneArgsOverridesAndDefaults(t *testing.T) {
+	ovTransfers := 12
+	ovCheckers := 24
+	ovRetries := 7
+	ovLowRetries := 15
+	ovMaxDelete := 25
+
+	defaults := domain.GlobalSettings{
+		Transfers:       4,
+		Checkers:        8,
+		BwLimit:         "5M",
+		Retries:         3,
+		LowLevelRetries: 10,
+		Timeout:         "5m",
+		ConTimeout:      "1m",
+	}
+
+	job := domain.Job{
+		Operation:       "copyto",
+		Source:          "r2:src/file.txt",
+		Destination:     "/dst/file.txt",
+		Transfers:       &ovTransfers,
+		Checkers:        &ovCheckers,
+		BwLimit:         "20M",
+		Retries:         &ovRetries,
+		LowLevelRetries: &ovLowRetries,
+		Timeout:         "10m",
+		ConTimeout:      "30s",
+		MaxTransfer:     "50G",
+		CutoffMode:      "hard",
+		MaxDelete:       &ovMaxDelete,
+		ExcludePatterns: []string{"*.tmp"},
+		IncludePatterns: []string{"*.pdf"},
+		FilterRules:     []string{"- .DS_Store"},
+		CustomFlags:     "--fast-list --check-first",
+	}
+
+	args, _, _, err := BuildRcloneArgs(job, defaults, "/cfg/rclone.conf", true, time.Now())
+	if err != nil {
+		t.Fatalf("BuildRcloneArgs failed: %v", err)
+	}
+
+	for _, pair := range [][2]string{
+		{"--config", "/cfg/rclone.conf"},
+		{"--transfers", "12"},
+		{"--checkers", "24"},
+		{"--bwlimit", "20M"},
+		{"--retries", "7"},
+		{"--low-level-retries", "15"},
+		{"--timeout", "10m"},
+		{"--contimeout", "30s"},
+		{"--max-transfer", "50G"},
+		{"--max-delete", "25"},
+		{"--exclude", "*.tmp"},
+		{"--include", "*.pdf"},
+		{"--filter", "- .DS_Store"},
+	} {
+		if !containsFlagPair(args, pair[0], pair[1]) {
+			t.Errorf("expected flag pair %s %s in args: %v", pair[0], pair[1], args)
+		}
+	}
+
+	for _, single := range []string{"copyto", "--dry-run", "--cutoff-mode=hard", "--fast-list", "--check-first"} {
+		if !slices.Contains(args, single) {
+			t.Errorf("expected %q in args: %v", single, args)
+		}
+	}
+
+	// Empty overrides fall back to global defaults and invalid operation defaults to sync.
+	baseArgs, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:   "invalid",
+		Source:      "/a",
+		Destination: "/b",
+	}, defaults, "/cfg/rclone.conf", false, time.Now())
+	if err != nil {
+		t.Fatalf("fallback BuildRcloneArgs failed: %v", err)
+	}
+	if !slices.Contains(baseArgs, "sync") || !containsFlagPair(baseArgs, "--transfers", "4") || !containsFlagPair(baseArgs, "--bwlimit", "5M") {
+		t.Fatalf("unexpected fallback args: %v", baseArgs)
+	}
+}
+
+func TestBuildRcloneArgsVersioningSelfExclusion(t *testing.T) {
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	defaults := domain.GlobalSettings{Transfers: 4, Checkers: 8}
+
+	// Default backup dir inside Destination gets /_versions/** excluded automatically.
+	argsDefault, baseDefault, datedDefault, err := BuildRcloneArgs(domain.Job{
+		Operation:         "sync",
+		Source:            "/src",
+		Destination:       "r2:bucket/docs",
+		VersioningEnabled: true,
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseDefault != "r2:bucket/docs/_versions" || datedDefault != "r2:bucket/docs/_versions/2026-11-27" {
+		t.Fatalf("unexpected default backup dirs: base=%q dated=%q", baseDefault, datedDefault)
+	}
+	if !containsFlagPair(argsDefault, "--backup-dir", "r2:bucket/docs/_versions/2026-11-27") ||
+		!containsFlagPair(argsDefault, "--exclude", "/_versions/**") {
+		t.Fatalf("expected auto self-exclude for default _versions: %v", argsDefault)
+	}
+
+	// Nested custom backup dir inside remote root Destination excludes relative subpath.
+	argsNested, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:         "sync",
+		Source:            "/src",
+		Destination:       "r2:",
+		VersioningEnabled: true,
+		BackupDirBase:     "r2:sub/old",
+		VersionFormat:     "2006-01-02_1504",
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsFlagPair(argsNested, "--backup-dir", "r2:sub/old/2026-11-27_0900") ||
+		!containsFlagPair(argsNested, "--exclude", "/sub/old/**") {
+		t.Fatalf("expected nested relative self-exclude: %v", argsNested)
+	}
+
+	// Custom backup dir OUTSIDE Destination must NOT inject an --exclude rule.
+	argsOutside, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:         "sync",
+		Source:            "/src",
+		Destination:       "r2:docs",
+		VersioningEnabled: true,
+		BackupDirBase:     "r2:archive/vers",
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsFlagPair(argsOutside, "--backup-dir", "r2:archive/vers/2026-11-27") {
+		t.Fatalf("expected external backup-dir set: %v", argsOutside)
+	}
+	if slices.Contains(argsOutside, "--exclude") {
+		t.Fatalf("did not expect --exclude for external backup_dir_base: %v", argsOutside)
+	}
+}
+
+func TestBuildRcloneArgsRejectsManagedCustomFlags(t *testing.T) {
+	_, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:   "copy",
+		Source:      "/src",
+		Destination: "/dst",
+		CustomFlags: "--config /etc/evil.conf",
+	}, domain.GlobalSettings{}, "/cfg/rclone.conf", false, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "--config") {
+		t.Fatalf("expected managed --config rejection error, got %v", err)
+	}
+}

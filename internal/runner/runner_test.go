@@ -260,3 +260,59 @@ func TestRunnerDryRunAndOverlapProtection(t *testing.T) {
 		t.Fatalf("expected 1 skipped run recorded, got %d", len(runs))
 	}
 }
+
+func TestRunnerStopQueuedJobCancelsCleanly(t *testing.T) {
+	ctx := context.Background()
+	r, store, dir := setupTestRunner(t)
+	src := filepath.Join(dir, "qsrc")
+	dst := filepath.Join(dir, "qdst")
+	_ = os.MkdirAll(src, 0o755)
+	_ = os.MkdirAll(dst, 0o755)
+	_ = os.WriteFile(filepath.Join(src, "q.txt"), []byte("queued"), 0o644)
+
+	job, err := store.CreateJob(ctx, domain.Job{
+		Name:        "Queued Cancel Test",
+		Enabled:     true,
+		Operation:   "copy",
+		Source:      src,
+		Destination: dst,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fill concurrency gate so the job stays queued until StopJob cancels it.
+	r.UpdateMaxConcurrent(1)
+	if err := r.gate.acquire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gateReleased := false
+	defer func() {
+		if !gateReleased {
+			r.gate.release()
+		}
+	}()
+
+	run, err := r.StartJob(*job, "manual", false)
+	if err != nil {
+		t.Fatalf("StartJob failed: %v", err)
+	}
+	if _, active := r.ActiveRunByJob(job.ID); !active {
+		t.Fatal("expected queued job to be active before StopJob")
+	}
+
+	if err := r.StopJob(job.ID); err != nil {
+		t.Fatalf("StopJob failed: %v", err)
+	}
+	r.gate.release()
+	gateReleased = true
+
+	res := waitForRunDone(t, store, run.ID)
+	if res.Status != "cancelled" {
+		t.Fatalf("expected cancelled status, got %+v", res)
+	}
+	r.Wait()
+	if _, active := r.ActiveRunByJob(job.ID); active {
+		t.Fatal("expected job removed from active map after completion")
+	}
+}

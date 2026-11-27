@@ -99,7 +99,7 @@ func setupAuthenticatedClient(t *testing.T, ts *httptest.Server) *http.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /api/auth/setup = %d, want 201", resp.StatusCode)
 	}
@@ -116,7 +116,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	}
 	var st service.AuthStatus
 	_ = json.NewDecoder(stResp.Body).Decode(&st)
-	stResp.Body.Close()
+	_ = stResp.Body.Close()
 	if stResp.StatusCode != http.StatusOK || !st.SetupRequired || st.Authenticated {
 		t.Fatalf("unexpected initial auth status: code=%d status=%+v", stResp.StatusCode, st)
 	}
@@ -127,7 +127,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r.Body.Close()
+		_ = r.Body.Close()
 		if r.StatusCode != http.StatusOK {
 			t.Fatalf("public route %s = %d, want 200", pub, r.StatusCode)
 		}
@@ -140,7 +140,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r.Body.Close()
+		_ = r.Body.Close()
 		if r.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated GET %s = %d, want 401", p, r.StatusCode)
 		}
@@ -149,7 +149,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cpUnauth.Body.Close()
+	_ = cpUnauth.Body.Close()
 	if cpUnauth.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated change-password = %d, want 401", cpUnauth.StatusCode)
 	}
@@ -159,7 +159,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badSetup.Body.Close()
+	_ = badSetup.Body.Close()
 	if badSetup.StatusCode != http.StatusBadRequest {
 		t.Fatalf("weak setup password = %d, want 400", badSetup.StatusCode)
 	}
@@ -170,7 +170,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	okSetup.Body.Close()
+	_ = okSetup.Body.Close()
 	if okSetup.StatusCode != http.StatusCreated {
 		t.Fatalf("valid setup = %d, want 201", okSetup.StatusCode)
 	}
@@ -189,7 +189,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dupSetup.Body.Close()
+	_ = dupSetup.Body.Close()
 	if dupSetup.StatusCode != http.StatusForbidden {
 		t.Fatalf("duplicate setup = %d, want 403", dupSetup.StatusCode)
 	}
@@ -201,7 +201,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	}
 	var authedSt service.AuthStatus
 	_ = json.NewDecoder(authedStResp.Body).Decode(&authedSt)
-	authedStResp.Body.Close()
+	_ = authedStResp.Body.Close()
 	if !authedSt.Authenticated || authedSt.SetupRequired || authedSt.User == nil || authedSt.User.Username != "admin" {
 		t.Fatalf("unexpected authenticated status: %+v", authedSt)
 	}
@@ -212,7 +212,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badLogin.Body.Close()
+	_ = badLogin.Body.Close()
 	if badLogin.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("bad login = %d, want 401", badLogin.StatusCode)
 	}
@@ -220,7 +220,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	goodLogin.Body.Close()
+	_ = goodLogin.Body.Close()
 	if goodLogin.StatusCode != http.StatusOK {
 		t.Fatalf("good login = %d, want 200", goodLogin.StatusCode)
 	}
@@ -230,7 +230,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badCP.Body.Close()
+	_ = badCP.Body.Close()
 	if badCP.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("bad change-password = %d, want 401", badCP.StatusCode)
 	}
@@ -240,7 +240,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	goodCP.Body.Close()
+	_ = goodCP.Body.Close()
 	if goodCP.StatusCode != http.StatusOK {
 		t.Fatalf("good change-password = %d, want 200", goodCP.StatusCode)
 	}
@@ -249,7 +249,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c1Check.Body.Close()
+	_ = c1Check.Body.Close()
 	if c1Check.StatusCode != http.StatusOK {
 		t.Fatalf("expected c1 session to remain valid, got %d", c1Check.StatusCode)
 	}
@@ -257,7 +257,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c2Check.Body.Close()
+	_ = c2Check.Body.Close()
 	if c2Check.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected c2 session revoked after password change, got %d", c2Check.StatusCode)
 	}
@@ -267,7 +267,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loResp.Body.Close()
+	_ = loResp.Body.Close()
 	if loResp.StatusCode != http.StatusOK {
 		t.Fatalf("logout = %d, want 200", loResp.StatusCode)
 	}
@@ -275,7 +275,7 @@ func TestAPIAuthMandatoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterLo.Body.Close()
+	_ = afterLo.Body.Close()
 	if afterLo.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after logout, got %d", afterLo.StatusCode)
 	}
@@ -290,7 +290,7 @@ func TestAPISecurityHeadersAndNoWildcardCORS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("expected no Access-Control-Allow-Origin header by default, got %q", got)
@@ -300,6 +300,19 @@ func TestAPISecurityHeadersAndNoWildcardCORS(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-Frame-Options"); got != "DENY" {
 		t.Fatalf("expected X-Frame-Options=DENY, got %q", got)
+	}
+
+	// Cross-site state-changing browser request must be blocked by CSRF protection.
+	csrfReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/jobs", strings.NewReader(`{}`))
+	csrfReq.Header.Set("Origin", "https://evil.example.com")
+	csrfReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	csrfResp, err := http.DefaultClient.Do(csrfReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = csrfResp.Body.Close()
+	if csrfResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for cross-site POST, got %d", csrfResp.StatusCode)
 	}
 }
 
@@ -312,7 +325,7 @@ func TestAPIHealthSettingsAndExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health status = %d", resp.StatusCode)
 	}
@@ -332,7 +345,7 @@ func TestAPIHealthSettingsAndExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	putResp.Body.Close()
+	_ = putResp.Body.Close()
 	if putResp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT settings = %d", putResp.StatusCode)
 	}
@@ -344,7 +357,7 @@ func TestAPIHealthSettingsAndExportImport(t *testing.T) {
 	}
 	var yamlBuf bytes.Buffer
 	_, _ = yamlBuf.ReadFrom(expResp.Body)
-	expResp.Body.Close()
+	_ = expResp.Body.Close()
 	if expResp.StatusCode != http.StatusOK || !strings.Contains(yamlBuf.String(), "Asia/Tokyo") {
 		t.Fatalf("unexpected YAML export: status=%d body=%s", expResp.StatusCode, yamlBuf.String())
 	}
@@ -353,7 +366,7 @@ func TestAPIHealthSettingsAndExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	impResp.Body.Close()
+	_ = impResp.Body.Close()
 	if impResp.StatusCode != http.StatusOK {
 		t.Fatalf("POST import YAML = %d", impResp.StatusCode)
 	}
@@ -387,7 +400,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r1.Body.Close()
+	_ = r1.Body.Close()
 	if r1.StatusCode != http.StatusCreated {
 		t.Fatalf("create alias status = %d", r1.StatusCode)
 	}
@@ -405,7 +418,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2.Body.Close()
+	_ = r2.Body.Close()
 	if r2.StatusCode != http.StatusCreated {
 		t.Fatalf("create crypt status = %d", r2.StatusCode)
 	}
@@ -417,7 +430,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	}
 	var remotes []rclone.RemoteInfo
 	_ = json.NewDecoder(listResp.Body).Decode(&remotes)
-	listResp.Body.Close()
+	_ = listResp.Body.Close()
 	if len(remotes) != 2 {
 		t.Fatalf("expected 2 remotes, got %d", len(remotes))
 	}
@@ -434,7 +447,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	}
 	var testRes rclone.RemoteTestResult
 	_ = json.NewDecoder(testResp.Body).Decode(&testRes)
-	testResp.Body.Close()
+	_ = testResp.Body.Close()
 	if !testRes.OK {
 		t.Fatalf("expected test remote OK, got %+v", testRes)
 	}
@@ -448,7 +461,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 		Entries []rclone.BrowseEntry `json:"entries"`
 	}
 	_ = json.NewDecoder(browseResp.Body).Decode(&browseData)
-	browseResp.Body.Close()
+	_ = browseResp.Body.Close()
 	if len(browseData.Entries) != 1 || browseData.Entries[0].Name != "notes.txt" {
 		t.Fatalf("unexpected browse entries: %+v", browseData.Entries)
 	}
@@ -459,7 +472,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	}
 	var dlBuf bytes.Buffer
 	_, _ = dlBuf.ReadFrom(dlResp.Body)
-	dlResp.Body.Close()
+	_ = dlResp.Body.Close()
 	if dlBuf.String() != "hello-restore" {
 		t.Fatalf("unexpected downloaded content: %q", dlBuf.String())
 	}
@@ -473,7 +486,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 		Versions []rclone.FileVersion `json:"versions"`
 	}
 	_ = json.NewDecoder(verResp.Body).Decode(&verPayload)
-	verResp.Body.Close()
+	_ = verResp.Body.Close()
 	if verResp.StatusCode != http.StatusOK || len(verPayload.Versions) != 1 || verPayload.Versions[0].Date != "2026-11-26" {
 		t.Fatalf("unexpected versions response: status=%d versions=%+v", verResp.StatusCode, verPayload.Versions)
 	}
@@ -491,7 +504,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	}
 	var restRun domain.JobRun
 	_ = json.NewDecoder(restResp.Body).Decode(&restRun)
-	restResp.Body.Close()
+	_ = restResp.Body.Close()
 	if restResp.StatusCode != http.StatusAccepted || restRun.ID == "" {
 		t.Fatalf("restore status=%d run=%+v", restResp.StatusCode, restRun)
 	}
@@ -503,7 +516,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 			if err == nil {
 				var got domain.JobRun
 				_ = json.NewDecoder(gr.Body).Decode(&got)
-				gr.Body.Close()
+				_ = gr.Body.Close()
 				if got.Status == "success" {
 					return
 				}
@@ -538,7 +551,7 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	}
 	var skipRun domain.JobRun
 	_ = json.NewDecoder(skipResp.Body).Decode(&skipRun)
-	skipResp.Body.Close()
+	_ = skipResp.Body.Close()
 	waitSuccess(skipRun.ID)
 
 	keptBytes, err := os.ReadFile(filepath.Join(localRoot, "restored", "notes.txt"))
@@ -561,7 +574,7 @@ func TestAPIJobsRunsAndSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sseResp.Body.Close()
+	defer func() { _ = sseResp.Body.Close() }()
 	reader := bufio.NewReader(sseResp.Body)
 	line1, err := reader.ReadString('\n')
 	if err != nil || !strings.HasPrefix(line1, "event: snapshot") {
@@ -583,7 +596,7 @@ func TestAPIJobsRunsAndSSE(t *testing.T) {
 	}
 	var created domain.Job
 	_ = json.NewDecoder(cResp.Body).Decode(&created)
-	cResp.Body.Close()
+	_ = cResp.Body.Close()
 	if cResp.StatusCode != http.StatusCreated || created.ID == "" {
 		t.Fatalf("create job failed: status=%d job=%+v", cResp.StatusCode, created)
 	}
@@ -595,7 +608,7 @@ func TestAPIJobsRunsAndSSE(t *testing.T) {
 	}
 	var run domain.JobRun
 	_ = json.NewDecoder(runResp.Body).Decode(&run)
-	runResp.Body.Close()
+	_ = runResp.Body.Close()
 	if runResp.StatusCode != http.StatusAccepted {
 		t.Fatalf("run job status = %d", runResp.StatusCode)
 	}
@@ -608,7 +621,7 @@ func TestAPIJobsRunsAndSSE(t *testing.T) {
 		if err == nil {
 			var got domain.JobRun
 			_ = json.NewDecoder(gr.Body).Decode(&got)
-			gr.Body.Close()
+			_ = gr.Body.Close()
 			if got.Status == "success" || got.Status == "failed" {
 				finalStatus = got.Status
 				break
@@ -629,7 +642,7 @@ func TestAPIJobsRunsAndSSE(t *testing.T) {
 		Raw string `json:"raw"`
 	}
 	_ = json.NewDecoder(logsResp.Body).Decode(&logsPayload)
-	logsResp.Body.Close()
+	_ = logsResp.Body.Close()
 	if logsPayload.Raw == "" {
 		t.Fatal("expected non-empty run logs")
 	}
@@ -639,8 +652,214 @@ func TestAPIJobsRunsAndSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cloneResp.Body.Close()
+	_ = cloneResp.Body.Close()
 	if cloneResp.StatusCode != http.StatusCreated {
 		t.Fatalf("clone job status = %d", cloneResp.StatusCode)
+	}
+}
+
+func TestAPIRemoteDeleteConflictGuard(t *testing.T) {
+	_, ts, dir := setupTestServer(t)
+	client := setupAuthenticatedClient(t, ts)
+
+	remotePayload, _ := json.Marshal(map[string]any{
+		"name":   "guardremote",
+		"type":   "alias",
+		"params": map[string]string{"remote": dir},
+	})
+	remResp, err := client.Post(ts.URL+"/api/remotes", "application/json", bytes.NewReader(remotePayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = remResp.Body.Close()
+	if remResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create remote status = %d", remResp.StatusCode)
+	}
+
+	jobPayload, _ := json.Marshal(domain.Job{
+		Name:        "Ref Job",
+		Enabled:     false,
+		Operation:   "copy",
+		Source:      dir,
+		Destination: "guardremote:docs",
+	})
+	jResp, err := client.Post(ts.URL+"/api/jobs", "application/json", bytes.NewReader(jobPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created domain.Job
+	_ = json.NewDecoder(jResp.Body).Decode(&created)
+	_ = jResp.Body.Close()
+	if jResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create job status = %d", jResp.StatusCode)
+	}
+
+	// Deleting referenced remote must return 409 Conflict.
+	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/remotes/guardremote", nil)
+	delResp, err := client.Do(delReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delResp.Body.Close()
+	if delResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict deleting referenced remote, got %d", delResp.StatusCode)
+	}
+
+	// After removing the job, deleting the remote succeeds.
+	delJobReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/jobs/"+created.ID, nil)
+	delJobResp, err := client.Do(delJobReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delJobResp.Body.Close()
+	if delJobResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete job status = %d", delJobResp.StatusCode)
+	}
+
+	delReq2, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/remotes/guardremote", nil)
+	delResp2, err := client.Do(delReq2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delResp2.Body.Close()
+	if delResp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK deleting unreferenced remote, got %d", delResp2.StatusCode)
+	}
+}
+
+func TestAPIAuthRateLimit429(t *testing.T) {
+	_, ts, _ := setupTestServer(t)
+	_ = setupAuthenticatedClient(t, ts)
+
+	// Send 10 empty-password login failures (skips expensive PBKDF2 work while testing IP limiter).
+	for i := 0; i < 10; i++ {
+		resp, err := http.Post(
+			ts.URL+"/api/auth/login",
+			"application/json",
+			strings.NewReader(`{"username":"admin","password":""}`),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("failure %d status = %d, want 401", i+1, resp.StatusCode)
+		}
+	}
+
+	// 11th attempt must hit 429 Too Many Requests with Retry-After header.
+	throttled, err := http.Post(
+		ts.URL+"/api/auth/login",
+		"application/json",
+		strings.NewReader(`{"username":"admin","password":""}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = throttled.Body.Close()
+	if throttled.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("11th attempt status = %d, want 429", throttled.StatusCode)
+	}
+	if throttled.Header.Get("Retry-After") == "" {
+		t.Fatal("expected non-empty Retry-After header on 429 response")
+	}
+}
+
+func TestAPICORSAndTrustedOriginCSRF(t *testing.T) {
+	srv, ts, _ := setupTestServer(t)
+	srv.cfg.CORSOrigins = []string{"https://ui.example.com"}
+	if err := srv.csrf.AddTrustedOrigin("https://ui.example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Allowed CORS origin gets echo + Allow-Credentials: true.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/health", nil)
+	req.Header.Set("Origin", "https://ui.example.com")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://ui.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want https://ui.example.com", got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want true", got)
+	}
+
+	// Trusted origin passes CrossOriginProtection on cross-site POST.
+	okReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/logout", nil)
+	okReq.Header.Set("Origin", "https://ui.example.com")
+	okReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	okResp, err := http.DefaultClient.Do(okReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = okResp.Body.Close()
+	if okResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for trusted cross-origin POST, got %d", okResp.StatusCode)
+	}
+
+	// Untrusted origin fails CrossOriginProtection with 403 Forbidden.
+	evilReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/logout", nil)
+	evilReq.Header.Set("Origin", "https://evil.example.com")
+	evilReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	evilResp, err := http.DefaultClient.Do(evilReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = evilResp.Body.Close()
+	if evilResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for untrusted cross-origin POST, got %d", evilResp.StatusCode)
+	}
+}
+
+func TestAPIMalformedJSONAndPathTraversal(t *testing.T) {
+	_, ts, dir := setupTestServer(t)
+	client := setupAuthenticatedClient(t, ts)
+
+	remotePayload, _ := json.Marshal(map[string]any{
+		"name":   "myalias",
+		"type":   "alias",
+		"params": map[string]string{"remote": dir},
+	})
+	remResp, err := client.Post(ts.URL+"/api/remotes", "application/json", bytes.NewReader(remotePayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = remResp.Body.Close()
+
+	jobPayload, _ := json.Marshal(domain.Job{
+		Name:        "JSON Check Job",
+		Operation:   "copy",
+		Source:      dir,
+		Destination: "myalias:out",
+	})
+	jResp, err := client.Post(ts.URL+"/api/jobs", "application/json", bytes.NewReader(jobPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created domain.Job
+	_ = json.NewDecoder(jResp.Body).Decode(&created)
+	_ = jResp.Body.Close()
+
+	// Malformed JSON body on /run must return 400 Bad Request.
+	badRunResp, err := client.Post(ts.URL+"/api/jobs/"+created.ID+"/run", "application/json", strings.NewReader("{bad-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = badRunResp.Body.Close()
+	if badRunResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for malformed /run JSON, got %d", badRunResp.StatusCode)
+	}
+
+	// Path traversal on browse download must be rejected (404 from StatFile rejecting '..').
+	travResp, err := client.Get(ts.URL + "/api/browse/download?remote=myalias&path=../secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = travResp.Body.Close()
+	if travResp.StatusCode == http.StatusOK {
+		t.Fatal("expected traversal download request to fail, got 200 OK")
 	}
 }

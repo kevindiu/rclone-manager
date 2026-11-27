@@ -55,7 +55,11 @@ func main() {
 		logger.Error("open database failed", "path", cfg.DBPath, "error", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			logger.Warn("close database warning", "error", err)
+		}
+	}()
 
 	ctx := context.Background()
 	if recovered, err := store.MarkInterruptedRunsFailed(ctx); err != nil {

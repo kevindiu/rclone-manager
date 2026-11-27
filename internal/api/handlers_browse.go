@@ -99,7 +99,7 @@ func (s *Server) handleBrowseVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "browse versions failed", err)
 		return
 	}
 	cleanSub, _ := rclone.CleanSubpath(subpath)
@@ -126,7 +126,7 @@ func (s *Server) handleBrowseRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "start restore failed", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)

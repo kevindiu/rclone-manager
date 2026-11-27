@@ -1,6 +1,7 @@
-import { Activity, Clock, HardDrive, Play, RefreshCw, Square, Terminal, Zap } from 'lucide-react';
+import { Activity, Clock, HardDrive, Play, RefreshCw, Terminal, Zap } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
+import { ActiveRunCard } from '../../components/ui/ActiveRunCard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { Tab } from '../../hooks/useRoute';
 import type {
@@ -11,14 +12,7 @@ import type {
   RemoteInfo,
   SystemInfo,
 } from '../../types/api';
-import {
-  formatBytes,
-  formatDateTime,
-  formatDurationMs,
-  formatETA,
-  formatRelative,
-  formatSpeed,
-} from '../../utils/format';
+import { formatBytes, formatDateTime, formatDurationMs, formatRelative } from '../../utils/format';
 
 export function DashboardPage({
   activeRuns,
@@ -165,79 +159,13 @@ export function DashboardPage({
           </div>
         ) : (
           <div className="space-y-3">
-            {activeRuns.map((run) => {
-              const p = run.progress;
-              const pct = Math.min(100, Math.max(0, p?.percentage ?? 0));
-              return (
-                <div
-                  key={run.run_id}
-                  className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-sky-500/40 shadow-lg space-y-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="font-semibold text-slate-100 truncate">{run.job_name}</span>
-                      <StatusBadge status={run.status} dryRun={run.dry_run} />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void api.stopJob(run.job_id)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30"
-                    >
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                      Stop
-                    </button>
-                  </div>
-
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between text-xs text-slate-300 mb-1.5 tabular-nums gap-2">
-                      <span>
-                        {formatBytes(p?.bytes)} / {formatBytes(p?.total_bytes)} ({pct.toFixed(1)}%)
-                      </span>
-                      <span className="flex items-center gap-3">
-                        <span className="text-emerald-400 font-medium">
-                          {formatSpeed(p?.speed)}
-                        </span>
-                        <span className="text-slate-400">ETA: {formatETA(p?.eta)}</span>
-                        <span className="text-slate-400">
-                          Files: {p?.transfers ?? 0}/{p?.total_transfers ?? 0}
-                        </span>
-                      </span>
-                    </div>
-                    <div className="w-full h-2.5 rounded-full bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-sky-500 to-emerald-400 transition-all duration-300"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {p?.transferring && p.transferring.length > 0 && (
-                    <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
-                      <div className="text-[11px] font-medium text-slate-400">
-                        Currently Transferring ({p.transferring.length})
-                      </div>
-                      {p.transferring.slice(0, 6).map((f) => (
-                        <div key={f.name} className="text-xs flex items-center gap-3">
-                          <span className="font-mono text-slate-200 truncate flex-1">{f.name}</span>
-                          <span className="text-slate-400 tabular-nums shrink-0">
-                            {formatSpeed(f.speed)}
-                          </span>
-                          <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden shrink-0">
-                            <div
-                              className="h-full bg-sky-400"
-                              style={{ width: `${Math.min(100, f.percentage)}%` }}
-                            />
-                          </div>
-                          <span className="w-9 text-right text-slate-300 tabular-nums shrink-0">
-                            {f.percentage}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {activeRuns.map((run) => (
+              <ActiveRunCard
+                key={run.run_id}
+                run={run}
+                onStop={(jobId) => void api.stopJob(jobId)}
+              />
+            ))}
           </div>
         )}
       </section>

@@ -232,12 +232,15 @@ export function connectSSE(handlers: SSEHandlers): () => void {
   let es: EventSource | null = null;
   let closed = false;
   let retryTimer: number | undefined;
+  let retryDelay = 3000;
+  const maxRetryDelay = 30000;
 
   const open = () => {
     if (closed) return;
     es = new EventSource('/api/events');
 
     es.onopen = () => {
+      retryDelay = 3000;
       handlers.onStatusChange?.(true);
     };
 
@@ -246,7 +249,8 @@ export function connectSSE(handlers: SSEHandlers): () => void {
       handlers.onError?.();
       es?.close();
       if (!closed) {
-        retryTimer = window.setTimeout(open, 3000);
+        retryTimer = window.setTimeout(open, retryDelay);
+        retryDelay = Math.min(maxRetryDelay, retryDelay * 2);
       }
     };
 

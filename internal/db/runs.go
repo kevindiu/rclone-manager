@@ -133,7 +133,7 @@ FROM job_runs ` + whereClause + ` ORDER BY started_at DESC LIMIT ? OFFSET ?`
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	runs := make([]domain.JobRun, 0)
 	for rows.Next() {
@@ -163,7 +163,7 @@ INNER JOIN (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]domain.JobRun)
 	for rows.Next() {

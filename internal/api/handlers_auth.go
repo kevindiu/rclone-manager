@@ -91,7 +91,7 @@ func clientIP(r *http.Request) string {
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := s.auth.Status(r.Context(), sessionTokenFromRequest(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, r, "auth status failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
@@ -115,7 +115,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrAlreadyInitialized):
 			writeError(w, http.StatusForbidden, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "initial admin setup failed", err)
 		}
 		return
 	}
@@ -145,7 +145,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrInvalidCredentials):
 			writeError(w, http.StatusUnauthorized, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "login failed", err)
 		}
 		return
 	}
@@ -186,7 +186,7 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 		case errors.Is(err, service.ErrInvalidCredentials), errors.Is(err, service.ErrUnauthorized):
 			writeError(w, http.StatusUnauthorized, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.writeInternalError(w, r, "change password failed", err)
 		}
 		return
 	}

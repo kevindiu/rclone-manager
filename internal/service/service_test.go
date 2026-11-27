@@ -136,15 +136,24 @@ func (m *mockHub) Broadcast(eventType string, _ any) {
 }
 
 type mockBrowser struct {
-	missingRemote string
-	lastExtra     []rclone.VersionRootCandidate
-	versions      []rclone.FileVersion
+	missingRemote  string
+	lastExtra      []rclone.VersionRootCandidate
+	versions       []rclone.FileVersion
+	deletedRemotes []string
 }
 
 func (m *mockBrowser) EnsureRemoteExists(_ context.Context, name string) error {
 	if m.missingRemote != "" && name == m.missingRemote {
 		return rclone.ErrRemoteNotFound
 	}
+	return nil
+}
+
+func (m *mockBrowser) DeleteRemote(_ context.Context, name string) error {
+	if m.missingRemote != "" && name == m.missingRemote {
+		return rclone.ErrRemoteNotFound
+	}
+	m.deletedRemotes = append(m.deletedRemotes, name)
 	return nil
 }
 
@@ -292,5 +301,133 @@ func TestStartRestoreAndListFileVersions(t *testing.T) {
 	}
 	if len(br.lastExtra) != 1 || br.lastExtra[0].BackupRoot != "archive/photos-vers" || br.lastExtra[0].RelPath != "2026/a.jpg" {
 		t.Fatalf("unexpected extra version candidates: %+v", br.lastExtra)
+	}
+}
+
+func TestDeleteRemoteGuards(t *testing.T) {
+	ctx := context.Background()
+	svc, st, _, _, _, br := newTestService()
+
+	st.jobs["j-src"] = domain.Job{ID: "j-src", Name: "FromR2", Source: "r2:bucket", Destination: "/local"}
+	st.jobs["j-dst"] = domain.Job{ID: "j-dst", Name: "ToB2", Source: "/local", Destination: "b2:backups"}
+	st.jobs["j-ver"] = domain.Job{ID: "j-ver", Name: "CustomVer", Source: "/local", Destination: "s3:main", BackupDirBase: "archive:vers"}
+
+	for _, name := range []string{"r2", "b2", "archive"} {
+		if err := svc.DeleteRemote(ctx, name); !errors.Is(err, ErrConflict) {
+			t.Fatalf("expected ErrConflict when deleting referenced remote %q, got %v", name, err)
+		}
+	}
+
+	if err := svc.DeleteRemote(ctx, "unused"); err != nil {
+		t.Fatalf("expected unreferenced remote delete to succeed, got %v", err)
+	}
+	if len(br.deletedRemotes) != 1 || br.deletedRemotes[0] != "unused" {
+		t.Fatalf("expected unused remote deleted, got %v", br.deletedRemotes)
+	}
+}
+
+func TestValidateJobAndJobsLifecycle(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _, sc, hb, _ := newTestService()
+
+	badJobs := []domain.Job{
+		{Name: "", Source: "/a", Destination: "/b"},
+		{Name: "NoSrc", Source: "", Destination: "/b"},
+		{Name: "NoDst", Source: "/a", Destination: ""},
+		{Name: "BadOp", Source: "/a", Destination: "/b", Operation: "move"},
+		{Name: "BadCron", Source: "/a", Destination: "/b", Schedule: "bad cron"},
+		{Name: "BadCutoff", Source: "/a", Destination: "/b", CutoffMode: "instant"},
+		{Name: "BadFlag", Source: "/a", Destination: "/b", CustomFlags: "--rc"},
+	}
+	for _, bj := range badJobs {
+		if _, err := svc.CreateJob(ctx, bj); !errors.Is(err, ErrValidation) {
+			t.Errorf("CreateJob(%+v) expected ErrValidation, got %v", bj.Name, err)
+		}
+	}
+
+	created, err := svc.CreateJob(ctx, domain.Job{
+		Name:        "Docs Backup",
+		Enabled:     true,
+		Source:      "/docs",
+		Destination: "r2:docs",
+		Schedule:    "0 * * * *",
+	})
+	if err != nil {
+		t.Fatalf("CreateJob failed: %v", err)
+	}
+	if created.Operation != "sync" {
+		t.Fatalf("expected default operation 'sync', got %q", created.Operation)
+	}
+
+	got, err := svc.GetJob(ctx, created.ID)
+	if err != nil || got.NextRun == nil {
+		t.Fatalf("GetJob unexpected result: got=%+v err=%v", got, err)
+	}
+
+	list, err := svc.ListJobs(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListJobs unexpected: len=%d err=%v", len(list), err)
+	}
+
+	created.Name = "Docs Copy"
+	created.Operation = "copy"
+	updated, err := svc.UpdateJob(ctx, created.ID, *created)
+	if err != nil || updated.Name != "Docs Copy" {
+		t.Fatalf("UpdateJob failed: updated=%+v err=%v", updated, err)
+	}
+
+	cloned, err := svc.CloneJob(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("CloneJob failed: %v", err)
+	}
+	if cloned.Enabled || cloned.Name != "Docs Copy (Copy)" {
+		t.Fatalf("unexpected cloned job: %+v", cloned)
+	}
+
+	toggled, err := svc.ToggleJob(ctx, cloned.ID)
+	if err != nil || !toggled.Enabled {
+		t.Fatalf("ToggleJob failed: toggled=%+v err=%v", toggled, err)
+	}
+
+	if err := svc.DeleteJob(ctx, cloned.ID); err != nil {
+		t.Fatalf("DeleteJob failed: %v", err)
+	}
+	if sc.reloads < 5 || len(hb.events) < 5 {
+		t.Fatalf("expected scheduler reloads and broadcasts, reloads=%d events=%d", sc.reloads, len(hb.events))
+	}
+}
+
+func TestReadRunLogsEdgeCases(t *testing.T) {
+	ctx := context.Background()
+	svc, st, _, _, _, _ := newTestService()
+
+	// Missing log file returns empty result without error.
+	st.runs["r-missing"] = domain.JobRun{ID: "r-missing", LogFile: filepath.Join(t.TempDir(), "does-not-exist.log")}
+	missingRes, err := svc.ReadRunLogs(ctx, "r-missing", 0, 0)
+	if err != nil || len(missingRes.Lines) != 0 {
+		t.Fatalf("expected empty lines for missing log file, got %+v err=%v", missingRes, err)
+	}
+
+	// Mixed JSON and plain lines respect maxLines.
+	logPath := filepath.Join(t.TempDir(), "mixed.log")
+	content := strings.Join([]string{
+		`{"time":"2026-11-27T01:00:00Z","level":"error","msg":"copy failed","object":"a.txt","size":42}`,
+		`{"time":"2026-11-27T01:00:01Z","level":"notice","msg":"","stats":{"bytes":10}}`,
+		`plain text message`,
+	}, "\n")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.runs["r-mixed"] = domain.JobRun{ID: "r-mixed", LogFile: logPath}
+
+	res, err := svc.ReadRunLogs(ctx, "r-mixed", 0, 2)
+	if err != nil {
+		t.Fatalf("ReadRunLogs mixed failed: %v", err)
+	}
+	if !res.Truncated || len(res.Lines) != 2 {
+		t.Fatalf("expected 2 tailed lines with Truncated=true, got %+v", res)
+	}
+	if !res.Lines[0].IsStats || res.Lines[1].Msg != "plain text message" {
+		t.Fatalf("unexpected parsed log lines: %+v", res.Lines)
 	}
 }
