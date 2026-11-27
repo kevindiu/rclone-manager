@@ -66,3 +66,7 @@ Open `http://localhost:8080` in your browser.
 | `RCLONE_MANAGER_LOG_LEVEL` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
 
 Transfer defaults (`transfers`, `checkers`, bandwidth limit, retries, timeouts, max concurrent jobs, and log retention) are configured directly in **Settings** inside the web UI.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

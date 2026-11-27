@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
+import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ActiveRunCard } from '../../components/ui/ActiveRunCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { Modal } from '../../components/ui/Modal';
@@ -420,10 +421,11 @@ export function BrowsePage({
             type="button"
             onClick={() => void loadDir()}
             disabled={loading || !remote}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
+            aria-label="Refresh directory"
+            title="Refresh directory"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
@@ -628,27 +630,6 @@ export function BrowsePage({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {previewable && (
-                      <button
-                        type="button"
-                        onClick={() => setPreviewTarget({ entry, fullPath: fPath })}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300"
-                        title="Preview file"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    {!isVersionDir && !insideVersionsDir && (
-                      <button
-                        type="button"
-                        onClick={() => setVersionTarget({ entry, fullPath: fPath })}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-amber-300"
-                        title="View archived versions"
-                      >
-                        <History className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Versions</span>
-                      </button>
-                    )}
                     {!entry.IsDir && (
                       <a
                         href={api.downloadUrl(remote, fPath)}
@@ -668,25 +649,37 @@ export function BrowsePage({
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">Restore</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRenameTarget({ entry, fullPath: fPath });
-                        setRenameValue(entry.Name);
-                      }}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                      title="Rename"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget({ entry, fullPath: fPath })}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <ActionMenu
+                      ariaLabel={`More actions for ${entry.Name}`}
+                      items={[
+                        {
+                          label: 'Preview',
+                          icon: <Eye className="w-3.5 h-3.5 text-sky-300" />,
+                          hidden: !previewable,
+                          onClick: () => setPreviewTarget({ entry, fullPath: fPath }),
+                        },
+                        {
+                          label: 'Versions',
+                          icon: <History className="w-3.5 h-3.5 text-amber-300" />,
+                          hidden: isVersionDir || insideVersionsDir,
+                          onClick: () => setVersionTarget({ entry, fullPath: fPath }),
+                        },
+                        {
+                          label: 'Rename',
+                          icon: <Pencil className="w-3.5 h-3.5" />,
+                          onClick: () => {
+                            setRenameTarget({ entry, fullPath: fPath });
+                            setRenameValue(entry.Name);
+                          },
+                        },
+                        {
+                          label: 'Delete',
+                          icon: <Trash2 className="w-3.5 h-3.5" />,
+                          danger: true,
+                          onClick: () => setDeleteTarget({ entry, fullPath: fPath }),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               );

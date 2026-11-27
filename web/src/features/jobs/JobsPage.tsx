@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client';
+import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import type {
@@ -183,7 +184,7 @@ export function JobsPage({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     {job.is_running ? (
                       <button
                         type="button"
@@ -196,46 +197,19 @@ export function JobsPage({
                         Stop
                       </button>
                     ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleAction(
-                              () => api.runJob(job.id, false),
-                              `Started "${job.name}"`
-                            )
-                          }
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          Run Now
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleAction(
-                              () => api.runJob(job.id, true),
-                              `Started dry run for "${job.name}"`
-                            )
-                          }
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-violet-300"
-                          title="Dry Run (no destination changes)"
-                        >
-                          <FlaskConical className="w-3.5 h-3.5" />
-                          Dry Run
-                        </button>
-                        {job.operation === 'bisync' && (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmResyncJob(job)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30"
-                            title="Run bisync --resync (required on first run or after resetting state)"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            Resync
-                          </button>
-                        )}
-                      </>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleAction(
+                            () => api.runJob(job.id, false),
+                            `Started "${job.name}"`
+                          )
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        Run Now
+                      </button>
                     )}
                     <button
                       type="button"
@@ -245,25 +219,40 @@ export function JobsPage({
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void handleAction(() => api.cloneJob(job.id), `Cloned "${job.name}"`)
-                      }
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                      title="Clone"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={job.is_running}
-                      onClick={() => setConfirmDeleteJob(job)}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 disabled:opacity-40"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <ActionMenu
+                      ariaLabel={`More actions for ${job.name}`}
+                      items={[
+                        {
+                          label: 'Dry Run',
+                          icon: <FlaskConical className="w-3.5 h-3.5 text-violet-300" />,
+                          hidden: job.is_running,
+                          onClick: () =>
+                            void handleAction(
+                              () => api.runJob(job.id, true),
+                              `Started dry run for "${job.name}"`
+                            ),
+                        },
+                        {
+                          label: 'Bisync Resync',
+                          icon: <RefreshCw className="w-3.5 h-3.5 text-violet-300" />,
+                          hidden: job.is_running || job.operation !== 'bisync',
+                          onClick: () => setConfirmResyncJob(job),
+                        },
+                        {
+                          label: 'Clone Job',
+                          icon: <Copy className="w-3.5 h-3.5" />,
+                          onClick: () =>
+                            void handleAction(() => api.cloneJob(job.id), `Cloned "${job.name}"`),
+                        },
+                        {
+                          label: 'Delete',
+                          icon: <Trash2 className="w-3.5 h-3.5" />,
+                          danger: true,
+                          disabled: job.is_running,
+                          onClick: () => setConfirmDeleteJob(job),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
 

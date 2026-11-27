@@ -101,11 +101,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/settings/test-webhook", s.handleTestWebhook)
 	s.mux.HandleFunc("GET /api/config/export", s.handleExportConfig)
 	s.mux.HandleFunc("POST /api/config/import", s.handleImportConfig)
+	s.mux.HandleFunc("POST /api/config/export-full", s.handleExportFullConfig)
+	s.mux.HandleFunc("POST /api/config/import-full", s.handleImportFullConfig)
 
 	// Remotes
 	s.mux.HandleFunc("GET /api/remotes/providers", s.handleListProviders)
 	s.mux.HandleFunc("GET /api/remotes", s.handleListRemotes)
 	s.mux.HandleFunc("POST /api/remotes", s.handleCreateRemote)
+	s.mux.HandleFunc("POST /api/remotes/test-draft", s.handleTestDraftRemote)
 	s.mux.HandleFunc("PUT /api/remotes/{name}", s.handleUpdateRemote)
 	s.mux.HandleFunc("DELETE /api/remotes/{name}", s.handleDeleteRemote)
 	s.mux.HandleFunc("POST /api/remotes/import-conf", s.handleImportConf)
@@ -118,6 +121,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/jobs", s.handleListJobs)
 	s.mux.HandleFunc("POST /api/jobs", s.handleCreateJob)
 	s.mux.HandleFunc("POST /api/jobs/preview-command", s.handlePreviewJobCommand)
+	s.mux.HandleFunc("POST /api/jobs/dry-run", s.handleDryRunDraftJob)
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.handleGetJob)
 	s.mux.HandleFunc("PUT /api/jobs/{id}", s.handleUpdateJob)
 	s.mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)

@@ -282,3 +282,12 @@ export interface BulkDeleteResponse {
   deleted: number;
   failed: { path: string; error: string }[];
 }
+
+export interface DraftDryRunResult {
+  ok: boolean;
+  duration_ms: number;
+  command: string;
+  summary: string;
+  lines?: string[];
+  error?: string;
+}

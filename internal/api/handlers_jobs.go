@@ -172,6 +172,24 @@ func (s *Server) handlePreviewJobCommand(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"command": cmd})
 }
 
+func (s *Server) handleDryRunDraftJob(w http.ResponseWriter, r *http.Request) {
+	var job domain.Job
+	if err := decodeJSON(r, &job); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
+	}
+	res, err := s.svc.DryRunDraftJob(r.Context(), job)
+	if errors.Is(err, service.ErrValidation) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "draft dry run failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *Server) handleStopJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.svc.StopJob(id); errors.Is(err, runner.ErrJobNotRunning) {

@@ -8,6 +8,7 @@ import type {
   DailyRunStat,
   DedupeResult,
   DirSize,
+  DraftDryRunResult,
   FileVersion,
   GlobalSettings,
   Job,
@@ -29,6 +30,17 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
   unauthorizedHandler = fn;
 }
 
+async function readErrorMessage(res: Response): Promise<string> {
+  let errMsg = `HTTP ${res.status}`;
+  try {
+    const data = await res.json();
+    if (data?.error) errMsg = data.error;
+  } catch {
+    // ignore parse failure
+  }
+  return errMsg;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: 'same-origin',
@@ -46,14 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    let errMsg = `HTTP ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.error) errMsg = data.error;
-    } catch {
-      // ignore parse failure
-    }
-    throw new Error(errMsg);
+    throw new Error(await readErrorMessage(res));
   }
   return res.json() as Promise<T>;
 }
@@ -115,6 +120,36 @@ export const api = {
         body: content,
       }
     ),
+  exportFullBackup: async (passphrase: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch('/api/config/export-full', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase }),
+    });
+    if (res.status === 401) {
+      unauthorizedHandler?.();
+    }
+    if (!res.ok) {
+      throw new Error(await readErrorMessage(res));
+    }
+    const cd = res.headers.get('Content-Disposition') ?? '';
+    const quotedMatch = /filename="([^"]+)"/.exec(cd);
+    const bareMatch = /filename=([^;\s]+)/.exec(cd);
+    const filename = quotedMatch?.[1] || bareMatch?.[1] || 'rclone-manager-backup.rcmbak';
+    return { blob: await res.blob(), filename };
+  },
+  importFullBackup: (content: string, passphrase: string, mode: 'merge' | 'replace') =>
+    request<{
+      status: string;
+      mode: string;
+      jobs_imported: number;
+      remotes_imported: number;
+      remote_names: string[];
+    }>('/api/config/import-full', {
+      method: 'POST',
+      body: JSON.stringify({ content, passphrase, mode }),
+    }),
 
   // Remotes
   listProviders: () => request<ProviderInfo[]>('/api/remotes/providers'),
@@ -141,6 +176,11 @@ export const api = {
   testRemote: (name: string) =>
     request<RemoteTestResult>(`/api/remotes/${encodeURIComponent(name)}/test`, {
       method: 'POST',
+    }),
+  testDraftRemote: (name: string, type: string, params: Record<string, string>) =>
+    request<RemoteTestResult>('/api/remotes/test-draft', {
+      method: 'POST',
+      body: JSON.stringify({ name, type, params }),
     }),
   aboutRemote: (name: string) =>
     request<RemoteAbout>(`/api/remotes/${encodeURIComponent(name)}/about`),
@@ -170,6 +210,11 @@ export const api = {
     request<{ command: string }>('/api/jobs/preview-command', {
       method: 'POST',
       body: JSON.stringify({ job, dry_run, resync }),
+    }),
+  dryRunDraftJob: (job: Partial<Job>) =>
+    request<DraftDryRunResult>('/api/jobs/dry-run', {
+      method: 'POST',
+      body: JSON.stringify(job),
     }),
   deleteJob: (id: string) =>
     request<{ status: string }>(`/api/jobs/${encodeURIComponent(id)}`, {

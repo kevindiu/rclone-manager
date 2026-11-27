@@ -209,35 +209,23 @@ export function DashboardPage({
       )}
 
       {/* Live Transfers */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-sky-400" />
-            Live Progress
-          </h2>
-          <button
-            type="button"
-            onClick={onRefreshAll}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
-          </button>
-        </div>
-
-        {activeRuns.length === 0 ? (
-          <div className="p-6 rounded-2xl bg-slate-900/50 border border-slate-800/80 text-center text-sm text-slate-400">
-            No active jobs running right now. Trigger a job from{' '}
+      {activeRuns.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-sky-400" />
+              Live Progress
+            </h2>
             <button
               type="button"
-              onClick={() => onNavigate('jobs')}
-              className="text-sky-400 hover:underline font-medium"
+              onClick={onRefreshAll}
+              className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
             >
-              Jobs
-            </button>{' '}
-            to watch live transfer speed, ETA, and per-file progress here.
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh
+            </button>
           </div>
-        ) : (
+
           <div className="space-y-3">
             {activeRuns.map((run) => (
               <ActiveRunCard
@@ -248,56 +236,52 @@ export function DashboardPage({
               />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      {/* Remote Storage Quotas */}
-      {remotes.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-emerald-400" />
-              Remote Storage Quota
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {remotes.map((rem) => {
-              const about = aboutMap[rem.name];
-              const usedPct =
-                about?.supported && about.total && about.used !== undefined
-                  ? Math.min(100, (about.used / about.total) * 100)
-                  : null;
-              return (
-                <div
-                  key={rem.name}
-                  className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-sm text-slate-100 truncate">
-                        {rem.name}
+      {/* Remote Storage Quotas (only show remotes that support quota reporting) */}
+      {(() => {
+        const quotaRemotes = remotes.filter((rem) => aboutMap[rem.name]?.supported === true);
+        if (quotaRemotes.length === 0) return null;
+        return (
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                <HardDrive className="w-4 h-4 text-emerald-400" />
+                Remote Storage Quota
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {quotaRemotes.map((rem) => {
+                const about = aboutMap[rem.name];
+                const usedPct =
+                  about?.supported && about.total && about.used !== undefined
+                    ? Math.min(100, (about.used / about.total) * 100)
+                    : null;
+                return (
+                  <div
+                    key={rem.name}
+                    className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-slate-100 truncate">
+                          {rem.name}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400">{rem.type}</div>
                       </div>
-                      <div className="text-[11px] font-mono text-slate-400">{rem.type}</div>
+                      <button
+                        type="button"
+                        onClick={() => void fetchAbout(rem.name)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                        title="Refresh quota"
+                      >
+                        <RefreshCw
+                          className={`w-3.5 h-3.5 ${loadingAbout[rem.name] ? 'animate-spin' : ''}`}
+                        />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void fetchAbout(rem.name)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                      title="Refresh quota"
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 ${loadingAbout[rem.name] ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </div>
 
-                  {!about ? (
-                    <div className="text-xs text-slate-500">Checking quota...</div>
-                  ) : !about.supported ? (
-                    <div className="text-xs text-slate-500">
-                      Quota reporting not supported by this backend
-                    </div>
-                  ) : (
                     <div className="space-y-1.5">
                       <div className="flex justify-between text-xs text-slate-300 tabular-nums">
                         <span>Used: {formatBytes(about.used)}</span>
@@ -319,13 +303,13 @@ export function DashboardPage({
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* Upcoming Schedule & Recent Runs */}
       <StatsChart stats={runStats} loading={loadingStats} />

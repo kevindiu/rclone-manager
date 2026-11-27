@@ -13,6 +13,7 @@ import (
 	"github.com/kevindiu/rclone-manager/internal/db"
 	"github.com/kevindiu/rclone-manager/internal/domain"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
+	"github.com/kevindiu/rclone-manager/internal/runner"
 )
 
 type mockStore struct {
@@ -137,6 +138,9 @@ func (m *mockRunner) StartJob(job domain.Job, trigger string, dryRun bool) (*dom
 	return &domain.JobRun{ID: "run-1", JobID: job.ID, Trigger: trigger, DryRun: dryRun}, nil
 }
 func (m *mockRunner) StopJob(string) error { return nil }
+func (m *mockRunner) DryRunDraft(_ context.Context, _ domain.Job, _ domain.GlobalSettings) (runner.DraftDryRunResult, error) {
+	return runner.DraftDryRunResult{OK: true, Summary: "Dry run succeeded"}, nil
+}
 
 type mockScheduler struct{ reloads int }
 
@@ -156,6 +160,11 @@ type mockBrowser struct {
 	lastExtra      []rclone.VersionRootCandidate
 	versions       []rclone.FileVersion
 	deletedRemotes []string
+	rawConf        string
+	importedConf   string
+	importedMode   string
+	importRemotes  []string
+	importErr      error
 }
 
 func (m *mockBrowser) EnsureRemoteExists(_ context.Context, name string) error {
@@ -171,6 +180,22 @@ func (m *mockBrowser) DeleteRemote(_ context.Context, name string) error {
 	}
 	m.deletedRemotes = append(m.deletedRemotes, name)
 	return nil
+}
+
+func (m *mockBrowser) ReadRawConf(_ context.Context) (string, error) {
+	return m.rawConf, nil
+}
+
+func (m *mockBrowser) ImportConf(_ context.Context, content, mode string) ([]string, error) {
+	if m.importErr != nil {
+		return nil, m.importErr
+	}
+	m.importedConf = content
+	m.importedMode = mode
+	if len(m.importRemotes) > 0 {
+		return m.importRemotes, nil
+	}
+	return []string{"b2"}, nil
 }
 
 func (m *mockBrowser) ListVersions(_ context.Context, _, _ string, extra []rclone.VersionRootCandidate) ([]rclone.FileVersion, error) {

@@ -11,6 +11,7 @@ import (
 	"github.com/kevindiu/rclone-manager/internal/domain"
 	"github.com/kevindiu/rclone-manager/internal/notify"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
+	"github.com/kevindiu/rclone-manager/internal/runner"
 )
 
 // ErrValidation indicates invalid client-supplied input.
@@ -43,6 +44,7 @@ type JobRunner interface {
 	ActiveRunByJob(jobID string) (string, bool)
 	StartJob(job domain.Job, trigger string, dryRun bool) (*domain.JobRun, error)
 	StopJob(jobID string) error
+	DryRunDraft(ctx context.Context, job domain.Job, settings domain.GlobalSettings) (runner.DraftDryRunResult, error)
 }
 
 // ScheduleReloader reloads cron triggers when settings or jobs change.
@@ -55,10 +57,12 @@ type Broadcaster interface {
 	Broadcast(eventType string, data any)
 }
 
-// RcloneBrowser defines remote inspection, deletion, and version-discovery operations needed by AppService.
+// RcloneBrowser defines remote inspection, config backup/restore, deletion, and version-discovery operations needed by AppService.
 type RcloneBrowser interface {
 	EnsureRemoteExists(ctx context.Context, name string) error
 	DeleteRemote(ctx context.Context, name string) error
+	ReadRawConf(ctx context.Context) (string, error)
+	ImportConf(ctx context.Context, content, mode string) ([]string, error)
 	ListVersions(ctx context.Context, remote, subpath string, extra []rclone.VersionRootCandidate) ([]rclone.FileVersion, error)
 }
 

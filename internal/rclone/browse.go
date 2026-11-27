@@ -20,12 +20,15 @@ func (c *Client) TestRemote(ctx context.Context, name string) (RemoteTestResult,
 	if err := c.ensureRemoteExists(ctx, name); err != nil {
 		return RemoteTestResult{Remote: name, OK: false, Error: err.Error()}, err
 	}
+	return testRemoteWithConf(ctx, c.bin, c.confPath, name, name), nil
+}
 
+func testRemoteWithConf(ctx context.Context, bin, confPath, remoteName, displayName string) RemoteTestResult {
 	tCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(tCtx, c.bin, "--config", c.confPath, "lsf", "--max-depth", "1", name+":")
+	cmd := exec.CommandContext(tCtx, bin, "--config", confPath, "lsf", "--max-depth", "1", remoteName+":")
 	out, err := cmd.CombinedOutput()
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
@@ -34,11 +37,11 @@ func (c *Client) TestRemote(ctx context.Context, name string) (RemoteTestResult,
 			msg = err.Error()
 		}
 		return RemoteTestResult{
-			Remote:    name,
+			Remote:    displayName,
 			OK:        false,
 			LatencyMs: latency,
 			Error:     msg,
-		}, nil
+		}
 	}
 
 	lines := 0
@@ -48,11 +51,11 @@ func (c *Client) TestRemote(ctx context.Context, name string) (RemoteTestResult,
 		}
 	}
 	return RemoteTestResult{
-		Remote:    name,
+		Remote:    displayName,
 		OK:        true,
 		LatencyMs: latency,
 		Message:   fmt.Sprintf("Connected (%d top-level item(s) listed)", lines),
-	}, nil
+	}
 }
 
 // AboutRemote fetches quota/space usage via `rclone about <name>: --json`.

@@ -49,159 +49,108 @@ export function JobBasicsTab({
 
       <div>
         <label className="block text-xs font-medium text-slate-300 mb-1.5">Operation Mode</label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <button
-            type="button"
-            onClick={() => setOperation('copy')}
-            className={`p-3 rounded-xl border text-left transition-colors ${
-              operation === 'copy'
-                ? 'bg-emerald-500/10 border-emerald-500/60 text-slate-100'
-                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold">Copy (Backup Only)</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/20 text-emerald-300">
-                Safer
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Copies new &amp; updated files from Source to Destination. Never deletes files on
-              Destination.
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setOperation('sync')}
-            className={`p-3 rounded-xl border text-left transition-colors ${
-              operation === 'sync'
-                ? 'bg-amber-500/10 border-amber-500/60 text-slate-100'
-                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold">Sync (Exact Mirror)</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-300">
-                Deletes dest
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Makes Destination match Source exactly — deletes files in Destination removed from
-              Source.
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setOperation('move')}
-            className={`p-3 rounded-xl border text-left transition-colors ${
-              operation === 'move'
-                ? 'bg-rose-500/10 border-rose-500/60 text-slate-100'
-                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold">Move (Transfer &amp; Delete Source)</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/20 text-rose-300">
-                Deletes src
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Moves files to Destination and deletes each verified Source file afterward to free
-              local space.
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setOperation('check')}
-            className={`p-3 rounded-xl border text-left transition-colors ${
-              operation === 'check'
-                ? 'bg-sky-500/10 border-sky-500/60 text-slate-100'
-                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold">Check (Verify Integrity)</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/20 text-sky-300">
-                Read-only
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Verifies hashes and sizes between Source and Destination without modifying any files.
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setOperation('bisync')}
-            className={`sm:col-span-2 p-3 rounded-xl border text-left transition-colors ${
-              operation === 'bisync'
-                ? 'bg-violet-500/10 border-violet-500/60 text-slate-100'
-                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold">Bisync (Two-Way Sync)</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/20 text-violet-300">
-                Bidirectional
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Keeps both Source and Destination in sync in both directions. Supports conflict
-              resolution and propagates edits &amp; deletions both ways.
-            </p>
-          </button>
+        <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
+          {(
+            [
+              {
+                id: 'copy',
+                label: 'Copy',
+                activeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50',
+              },
+              {
+                id: 'sync',
+                label: 'Sync',
+                activeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/50',
+              },
+              {
+                id: 'move',
+                label: 'Move',
+                activeClass: 'bg-rose-500/20 text-rose-300 border-rose-500/50',
+              },
+              {
+                id: 'check',
+                label: 'Check',
+                activeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/50',
+              },
+              {
+                id: 'bisync',
+                label: 'Bisync',
+                activeClass: 'bg-violet-500/20 text-violet-300 border-violet-500/50',
+              },
+            ] as const
+          ).map((op) => {
+            const active = operation === op.id;
+            return (
+              <button
+                key={op.id}
+                type="button"
+                onClick={() => setOperation(op.id)}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-colors ${
+                  active
+                    ? op.activeClass
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                {op.label}
+              </button>
+            );
+          })}
         </div>
-        {operation === 'sync' && (
-          <p className="text-[11px] text-amber-300/90 mt-1.5">
-            Tip: Enable Versioning or Safety Guards to protect against accidental deletions.
-          </p>
-        )}
-        {operation === 'move' && (
-          <p className="text-[11px] text-rose-300/90 mt-1.5">
-            Warning: Source files are deleted as soon as they finish transferring to Destination.
-          </p>
-        )}
-        {operation === 'check' && (
-          <p className="text-[11px] text-sky-300/90 mt-1.5">
-            Note: Any missing or mismatched files fail the run and appear in run logs.
-          </p>
-        )}
+
+        <p className="text-[11px] text-slate-400 mt-1.5">
+          {operation === 'copy' &&
+            'Safer backup: copies new & changed files from Source to Destination without deleting anything.'}
+          {operation === 'sync' && (
+            <span className="text-amber-300/90">
+              Exact mirror: deletes files in Destination missing from Source. Enable Versioning or
+              Guards to stay safe.
+            </span>
+          )}
+          {operation === 'move' && (
+            <span className="text-rose-300/90">
+              Transfer &amp; delete: moves files to Destination and deletes each verified Source
+              file afterward.
+            </span>
+          )}
+          {operation === 'check' && (
+            <span className="text-sky-300/90">
+              Read-only check: compares hashes and sizes without modifying any files.
+            </span>
+          )}
+          {operation === 'bisync' && (
+            <span className="text-violet-300/90">
+              Two-way sync: syncs changes both ways (run Resync from Jobs menu on first setup).
+            </span>
+          )}
+        </p>
+
         {operation === 'bisync' && (
-          <div className="mt-2.5 p-3 rounded-xl bg-violet-500/10 border border-violet-500/30 space-y-2.5">
-            <p className="text-[11px] text-violet-200 leading-relaxed">
-              First run (or after changing paths/filters) requires running <strong>Resync</strong>{' '}
-              from the Jobs list to build initial bisync state.
-            </p>
-            <div>
-              <label
-                htmlFor="job-bisync-conflict"
-                className="block text-xs font-medium text-slate-200 mb-1"
-              >
-                Conflict Resolution (<code>--conflict-resolve</code>)
-              </label>
-              <select
-                id="job-bisync-conflict"
-                value={bisyncConflictResolve}
-                onChange={(e) =>
-                  setBisyncConflictResolve(
-                    e.target.value as NonNullable<Job['bisync_conflict_resolve']>
-                  )
-                }
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-violet-500"
-              >
-                <option value="">Default (none — fail / rename on conflict)</option>
-                <option value="newer">newer (keep most recently modified)</option>
-                <option value="older">older (keep oldest)</option>
-                <option value="larger">larger (keep largest file)</option>
-                <option value="smaller">smaller (keep smallest file)</option>
-                <option value="path1">path1 (always prefer Source)</option>
-                <option value="path2">path2 (always prefer Destination)</option>
-                <option value="none">none (fail run on conflict)</option>
-              </select>
-            </div>
+          <div className="mt-2">
+            <label
+              htmlFor="job-bisync-conflict"
+              className="block text-xs font-medium text-slate-300 mb-1"
+            >
+              Conflict Resolution (<code>--conflict-resolve</code>)
+            </label>
+            <select
+              id="job-bisync-conflict"
+              value={bisyncConflictResolve}
+              onChange={(e) =>
+                setBisyncConflictResolve(
+                  e.target.value as NonNullable<Job['bisync_conflict_resolve']>
+                )
+              }
+              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-violet-500"
+            >
+              <option value="">Default (none — fail / rename on conflict)</option>
+              <option value="newer">newer (keep most recently modified)</option>
+              <option value="older">older (keep oldest)</option>
+              <option value="larger">larger (keep largest file)</option>
+              <option value="smaller">smaller (keep smallest file)</option>
+              <option value="path1">path1 (always prefer Source)</option>
+              <option value="path2">path2 (always prefer Destination)</option>
+              <option value="none">none (fail run on conflict)</option>
+            </select>
           </div>
         )}
       </div>

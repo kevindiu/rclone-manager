@@ -1,5 +1,7 @@
 import {
+  Activity,
   Check,
+  CheckCircle2,
   Copy,
   Eye,
   EyeOff,
@@ -8,11 +10,12 @@ import {
   Loader2,
   Lock,
   RefreshCw,
+  XCircle,
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
-import type { RemoteInfo } from '../../types/api';
+import type { RemoteInfo, RemoteTestResult } from '../../types/api';
 import { PathPickerModal } from '../jobs/PathPickerModal';
 
 function generateSecret(length = 32): string {
@@ -52,6 +55,8 @@ export function CryptWizardModal({
   const [showSecrets, setShowSecrets] = useState(false);
   const [copiedCreds, setCopiedCreds] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<RemoteTestResult | null>(null);
   const [error, setError] = useState('');
   const [showPicker, setShowPicker] = useState(false);
 
@@ -88,6 +93,42 @@ export function CryptWizardModal({
     void navigator.clipboard.writeText(text);
     setCopiedCreds(true);
     window.setTimeout(() => setCopiedCreds(false), 1800);
+  };
+
+  const handleTestConnection = async () => {
+    if (!targetRemotePath || (sourceType === 'remote' && !baseRemote)) {
+      setError('Target storage location is required.');
+      return;
+    }
+    if (!password) {
+      setError('Encryption password is required.');
+      return;
+    }
+    setTesting(true);
+    setError('');
+    setTestResult(null);
+    try {
+      const params: Record<string, string> = {
+        remote: targetRemotePath,
+        filename_encryption: filenameEncryption,
+        directory_name_encryption: dirNameEncryption ? 'true' : 'false',
+        password,
+      };
+      if (password2.trim()) {
+        params.password2 = password2.trim();
+      }
+      const res = await api.testDraftRemote(name.trim() || 'crypt-draft', 'crypt', params);
+      setTestResult(res);
+    } catch (err) {
+      setTestResult({
+        remote: name.trim() || 'crypt',
+        ok: false,
+        latency_ms: 0,
+        error: err instanceof Error ? err.message : 'Connection test failed',
+      });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -145,9 +186,22 @@ export function CryptWizardModal({
             Cancel
           </button>
           <button
+            type="button"
+            disabled={saving || testing}
+            onClick={() => void handleTestConnection()}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium bg-slate-800 hover:bg-slate-700 text-emerald-300 disabled:opacity-50"
+          >
+            {testing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Activity className="w-4 h-4" />
+            )}
+            Test Connection
+          </button>
+          <button
             type="submit"
             form="crypt-wizard-form"
-            disabled={saving}
+            disabled={saving || testing}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
@@ -160,6 +214,27 @@ export function CryptWizardModal({
         {error && (
           <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
             {error}
+          </div>
+        )}
+
+        {testResult && (
+          <div
+            className={`p-3 rounded-xl border text-xs flex items-start gap-2 ${
+              testResult.ok
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            }`}
+          >
+            {testResult.ok ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+            ) : (
+              <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            )}
+            <span className="break-words">
+              {testResult.ok
+                ? `${testResult.message} (${testResult.latency_ms}ms)`
+                : testResult.error}
+            </span>
           </div>
         )}
 

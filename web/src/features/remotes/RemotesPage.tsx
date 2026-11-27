@@ -7,7 +7,6 @@ import {
   HardDrive,
   Layers,
   Loader2,
-  Lock,
   Plus,
   Trash2,
   Upload,
@@ -15,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/client';
+import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import type { ProviderInfo, RemoteAbout, RemoteInfo, RemoteTestResult } from '../../types/api';
 import { formatBytes } from '../../utils/format';
@@ -124,14 +124,6 @@ export function RemotesPage({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setShowCryptWizard(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
-          >
-            <Lock className="w-4 h-4" />
-            Encrypted Remote
-          </button>
-          <button
-            type="button"
             onClick={() => setShowImport(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
           >
@@ -169,44 +161,18 @@ export function RemotesPage({
                 className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 flex flex-col justify-between"
               >
                 <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-semibold text-slate-100">{rem.name}</h3>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30">
-                          {rem.type}
-                        </span>
-                      </div>
-                      {rem.description && (
-                        <p className="text-xs text-slate-400 mt-0.5">{rem.description}</p>
-                      )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-semibold text-slate-100 truncate">
+                        {rem.name}
+                      </h3>
+                      <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 shrink-0">
+                        {rem.type}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => onBrowseRemote(rem.name)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400"
-                        title="Browse files"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModalRemote(rem)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                        title="Edit remote"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteRemote(rem.name)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300"
-                        title="Delete remote"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {rem.description && (
+                      <p className="text-xs text-slate-400 mt-0.5">{rem.description}</p>
+                    )}
                   </div>
 
                   {configEntries.length > 0 && (
@@ -279,51 +245,66 @@ export function RemotesPage({
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800/70">
-                  <button
-                    type="button"
-                    disabled={testing[rem.name]}
-                    onClick={() => void runTest(rem.name)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
-                  >
-                    {testing[rem.name] ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Activity className="w-3.5 h-3.5 text-emerald-400" />
-                    )}
-                    Test Connectivity
-                  </button>
-                  <button
-                    type="button"
-                    disabled={loadingAbout[rem.name]}
-                    onClick={() => void runAbout(rem.name)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
-                  >
-                    {loadingAbout[rem.name] ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <HardDrive className="w-3.5 h-3.5 text-sky-400" />
-                    )}
-                    Check Quota
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmCleanupRemote(rem.name)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
-                    title="Run rclone cleanup (empties trash on supported backends)"
-                  >
-                    <Eraser className="w-3.5 h-3.5 text-amber-400" />
-                    Empty Trash
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDedupeRemote(rem.name)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
-                    title="Find and resolve duplicate filenames via rclone dedupe"
-                  >
-                    <Layers className="w-3.5 h-3.5 text-violet-400" />
-                    Dedupe
-                  </button>
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/70">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onBrowseRemote(rem.name)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Browse
+                    </button>
+                    <button
+                      type="button"
+                      disabled={testing[rem.name]}
+                      onClick={() => void runTest(rem.name)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
+                    >
+                      {testing[rem.name] ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
+                      Test
+                    </button>
+                  </div>
+                  <ActionMenu
+                    ariaLabel={`More actions for remote ${rem.name}`}
+                    items={[
+                      {
+                        label: loadingAbout[rem.name] ? 'Checking Quota...' : 'Check Quota',
+                        icon: loadingAbout[rem.name] ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                        ) : (
+                          <HardDrive className="w-3.5 h-3.5 text-sky-400" />
+                        ),
+                        disabled: loadingAbout[rem.name],
+                        onClick: () => void runAbout(rem.name),
+                      },
+                      {
+                        label: 'Deduplicate',
+                        icon: <Layers className="w-3.5 h-3.5 text-violet-400" />,
+                        onClick: () => setDedupeRemote(rem.name),
+                      },
+                      {
+                        label: 'Empty Trash',
+                        icon: <Eraser className="w-3.5 h-3.5 text-amber-400" />,
+                        onClick: () => setConfirmCleanupRemote(rem.name),
+                      },
+                      {
+                        label: 'Edit Remote',
+                        icon: <Edit3 className="w-3.5 h-3.5" />,
+                        onClick: () => setModalRemote(rem),
+                      },
+                      {
+                        label: 'Delete Remote',
+                        icon: <Trash2 className="w-3.5 h-3.5" />,
+                        danger: true,
+                        onClick: () => setConfirmDeleteRemote(rem.name),
+                      },
+                    ]}
+                  />
                 </div>
               </div>
             );
@@ -336,6 +317,10 @@ export function RemotesPage({
           providers={providers}
           remotes={remotes}
           existing={modalRemote}
+          onSelectCryptWizard={() => {
+            setModalRemote(undefined);
+            setShowCryptWizard(true);
+          }}
           onSaved={() => {
             onToast(modalRemote ? 'Remote updated' : 'Remote created');
             onReload();

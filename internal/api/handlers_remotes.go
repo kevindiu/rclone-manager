@@ -122,6 +122,24 @@ func (s *Server) handleTestRemote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+func (s *Server) handleTestDraftRemote(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name   string            `json:"name"`
+		Type   string            `json:"type"`
+		Params map[string]string `json:"params"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
+	}
+	res, err := s.client.TestRemoteConfig(r.Context(), req.Name, req.Type, req.Params)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *Server) handleAboutRemote(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	res, err := s.client.AboutRemote(r.Context(), name)

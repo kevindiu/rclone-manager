@@ -1115,4 +1115,239 @@ func TestAPINewEndpointsAndInlinePreview(t *testing.T) {
 	if fetchedSettings.TelegramBotToken != rclone.MaskedSecret || fetchedSettings.WebhookType != "telegram" || fetchedSettings.TelegramChatID != "-100777" {
 		t.Fatalf("unexpected masked GET /api/settings: %+v", fetchedSettings)
 	}
+
+	// Test draft remote connectivity without persisting to rclone.conf
+	draftDir := filepath.Join(dir, "draft-remote-dir")
+	_ = os.MkdirAll(draftDir, 0o755)
+	_ = os.WriteFile(filepath.Join(draftDir, "hello.txt"), []byte("hi"), 0o644)
+
+	remListBeforeResp, err := client.Get(ts.URL + "/api/remotes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remBefore []rclone.RemoteInfo
+	_ = json.NewDecoder(remListBeforeResp.Body).Decode(&remBefore)
+	_ = remListBeforeResp.Body.Close()
+
+	draftTestBody, _ := json.Marshal(map[string]any{
+		"name":   "unsaved-alias",
+		"type":   "alias",
+		"params": map[string]string{"remote": draftDir},
+	})
+	draftTestResp, err := client.Post(ts.URL+"/api/remotes/test-draft", "application/json", bytes.NewReader(draftTestBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var draftTestRes rclone.RemoteTestResult
+	_ = json.NewDecoder(draftTestResp.Body).Decode(&draftTestRes)
+	_ = draftTestResp.Body.Close()
+	if draftTestResp.StatusCode != http.StatusOK || !draftTestRes.OK {
+		t.Fatalf("unexpected test-draft response: status=%d res=%+v", draftTestResp.StatusCode, draftTestRes)
+	}
+
+	remListAfterResp, err := client.Get(ts.URL + "/api/remotes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remAfter []rclone.RemoteInfo
+	_ = json.NewDecoder(remListAfterResp.Body).Decode(&remAfter)
+	_ = remListAfterResp.Body.Close()
+	if len(remAfter) != len(remBefore) {
+		t.Fatalf("test-draft must not persist remote: before=%d after=%d", len(remBefore), len(remAfter))
+	}
+
+	// Test draft job dry run without creating job or writing destination files
+	draftDst := filepath.Join(dir, "draft-job-dst")
+	_ = os.MkdirAll(draftDst, 0o755)
+	draftJobBody, _ := json.Marshal(domain.Job{
+		Operation:   "copy",
+		Source:      draftDir,
+		Destination: draftDst,
+	})
+	draftJobResp, err := client.Post(ts.URL+"/api/jobs/dry-run", "application/json", bytes.NewReader(draftJobBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var draftDryRes runner.DraftDryRunResult
+	_ = json.NewDecoder(draftJobResp.Body).Decode(&draftDryRes)
+	_ = draftJobResp.Body.Close()
+	if draftJobResp.StatusCode != http.StatusOK || !draftDryRes.OK {
+		t.Fatalf("unexpected draft dry-run response: status=%d res=%+v", draftJobResp.StatusCode, draftDryRes)
+	}
+	if _, statErr := os.Stat(filepath.Join(draftDst, "hello.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("draft dry-run must not copy files to destination, stat err=%v", statErr)
+	}
+}
+
+func TestFullEncryptedBackupRoundTrip(t *testing.T) {
+	srv, ts, dir := setupTestServer(t)
+	client := setupAuthenticatedClient(t, ts)
+
+	remoteDir := filepath.Join(dir, "backup-src")
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create a remote
+	remBody, _ := json.Marshal(map[string]any{
+		"name":   "bakremote",
+		"type":   "alias",
+		"params": map[string]string{"remote": remoteDir},
+	})
+	remResp, err := client.Post(ts.URL+"/api/remotes", "application/json", bytes.NewReader(remBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = remResp.Body.Close()
+	if remResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create remote status = %d", remResp.StatusCode)
+	}
+
+	// 2. Save settings with sensitive telegram_bot_token
+	setBody := `{"transfers":6,"checkers":10,"bwlimit":"10M","retries":3,"low_level_retries":10,"timeout":"5m","contimeout":"1m","log_retention_days":30,"timezone":"UTC","max_concurrent_jobs":2,"webhook_type":"telegram","telegram_bot_token":"secret-tg-token-999","telegram_chat_id":"12345","webhook_on":"failure"}`
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", strings.NewReader(setBody))
+	req.Header.Set("Content-Type", "application/json")
+	setResp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = setResp.Body.Close()
+	if setResp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT settings status = %d", setResp.StatusCode)
+	}
+
+	// 3. Create a job referencing the remote
+	jobBody, _ := json.Marshal(map[string]any{
+		"name":        "BackupJob",
+		"operation":   "copy",
+		"source":      remoteDir,
+		"destination": "bakremote:out",
+		"enabled":     true,
+	})
+	jobResp, err := client.Post(ts.URL+"/api/jobs", "application/json", bytes.NewReader(jobBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdJob domain.Job
+	_ = json.NewDecoder(jobResp.Body).Decode(&createdJob)
+	_ = jobResp.Body.Close()
+	if jobResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create job status = %d", jobResp.StatusCode)
+	}
+
+	// 4. Short passphrase must fail with 400
+	shortResp, err := client.Post(ts.URL+"/api/config/export-full", "application/json", strings.NewReader(`{"passphrase":"short"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = shortResp.Body.Close()
+	if shortResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("short passphrase status = %d, want 400", shortResp.StatusCode)
+	}
+
+	// 5. Export full encrypted backup
+	expResp, err := client.Post(ts.URL+"/api/config/export-full", "application/json", strings.NewReader(`{"passphrase":"StrongPassphrase!2026"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encBuf bytes.Buffer
+	_, _ = encBuf.ReadFrom(expResp.Body)
+	_ = expResp.Body.Close()
+	if expResp.StatusCode != http.StatusOK {
+		t.Fatalf("export-full status = %d body=%s", expResp.StatusCode, encBuf.String())
+	}
+	if cd := expResp.Header.Get("Content-Disposition"); !strings.Contains(cd, ".rcmbak") {
+		t.Fatalf("expected .rcmbak Content-Disposition, got %q", cd)
+	}
+	if strings.Contains(encBuf.String(), "bakremote") || strings.Contains(encBuf.String(), "secret-tg-token-999") {
+		t.Fatal("encrypted export leaked raw remote name or telegram token")
+	}
+
+	// 6. Delete job and remote so state is clean before restore
+	delJobReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/jobs/"+createdJob.ID, nil)
+	delJobResp, err := client.Do(delJobReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delJobResp.Body.Close()
+	if delJobResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete job status = %d", delJobResp.StatusCode)
+	}
+
+	delRemReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/remotes/bakremote", nil)
+	delRemResp, err := client.Do(delRemReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delRemResp.Body.Close()
+	if delRemResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete remote status = %d", delRemResp.StatusCode)
+	}
+
+	// 7. Wrong passphrase restore must fail with 400
+	badImpBody, _ := json.Marshal(map[string]string{
+		"content":    encBuf.String(),
+		"passphrase": "WrongPassphrase!2026",
+		"mode":       "replace",
+	})
+	badImpResp, err := client.Post(ts.URL+"/api/config/import-full", "application/json", bytes.NewReader(badImpBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = badImpResp.Body.Close()
+	if badImpResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("wrong passphrase import status = %d, want 400", badImpResp.StatusCode)
+	}
+
+	// 8. Correct passphrase restore restores remote (with 0600 rclone.conf) and job
+	goodImpBody, _ := json.Marshal(map[string]string{
+		"content":    encBuf.String(),
+		"passphrase": "StrongPassphrase!2026",
+		"mode":       "replace",
+	})
+	goodImpResp, err := client.Post(ts.URL+"/api/config/import-full", "application/json", bytes.NewReader(goodImpBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var impRes struct {
+		Status          string   `json:"status"`
+		JobsImported    int      `json:"jobs_imported"`
+		RemotesImported int      `json:"remotes_imported"`
+		RemoteNames     []string `json:"remote_names"`
+	}
+	_ = json.NewDecoder(goodImpResp.Body).Decode(&impRes)
+	_ = goodImpResp.Body.Close()
+	if goodImpResp.StatusCode != http.StatusOK || impRes.JobsImported != 1 || impRes.RemotesImported != 1 {
+		t.Fatalf("unexpected import-full response: status=%d res=%+v", goodImpResp.StatusCode, impRes)
+	}
+
+	info, err := os.Stat(srv.cfg.RcloneConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("rclone.conf mode = %o, want 0600", perm)
+	}
+
+	listRemResp, err := client.Get(ts.URL + "/api/remotes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rems []rclone.RemoteInfo
+	_ = json.NewDecoder(listRemResp.Body).Decode(&rems)
+	_ = listRemResp.Body.Close()
+	if len(rems) != 1 || rems[0].Name != "bakremote" {
+		t.Fatalf("expected restored remote bakremote, got %+v", rems)
+	}
+
+	listJobResp, err := client.Get(ts.URL + "/api/jobs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobs []domain.Job
+	_ = json.NewDecoder(listJobResp.Body).Decode(&jobs)
+	_ = listJobResp.Body.Close()
+	if len(jobs) != 1 || jobs[0].Name != "BackupJob" {
+		t.Fatalf("expected restored job BackupJob, got %+v", jobs)
+	}
 }

@@ -1,5 +1,7 @@
 import {
+  Activity,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -9,17 +11,19 @@ import {
   Loader2,
   Plus,
   Search,
+  XCircle,
 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
-import type { ProviderInfo, ProviderOption, RemoteInfo } from '../../types/api';
+import type { ProviderInfo, ProviderOption, RemoteInfo, RemoteTestResult } from '../../types/api';
 import { PathPickerModal } from '../jobs/PathPickerModal';
 
 interface RemoteModalProps {
   providers: ProviderInfo[];
   remotes: RemoteInfo[];
   existing?: RemoteInfo | null;
+  onSelectCryptWizard?: () => void;
   onSaved: () => void;
   onClose: () => void;
 }
@@ -52,7 +56,14 @@ const SINGLE_REMOTE_PROVIDERS = new Set([
   'cache',
 ]);
 
-export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: RemoteModalProps) {
+export function RemoteModal({
+  providers,
+  remotes,
+  existing,
+  onSelectCryptWizard,
+  onSaved,
+  onClose,
+}: RemoteModalProps) {
   const isEdit = Boolean(existing);
   const [name, setName] = useState(existing?.name ?? '');
   const [selectedType, setSelectedType] = useState(existing?.type ?? '');
@@ -67,6 +78,8 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
   });
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<RemoteTestResult | null>(null);
   const [error, setError] = useState('');
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [pickerOpt, setPickerOpt] = useState<{
@@ -132,6 +145,34 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
       setCopiedCmd(true);
       window.setTimeout(() => setCopiedCmd(false), 2000);
     });
+  };
+
+  const handleTestConnection = async () => {
+    if (!selectedType) return;
+    if (activeProvider?.is_oauth && values.token && values.token !== '••••••••') {
+      try {
+        JSON.parse(values.token);
+      } catch {
+        setError('OAuth token must be valid JSON as output by `rclone authorize`');
+        return;
+      }
+    }
+    setTesting(true);
+    setError('');
+    setTestResult(null);
+    try {
+      const res = await api.testDraftRemote(name.trim(), selectedType, values);
+      setTestResult(res);
+    } catch (err) {
+      setTestResult({
+        remote: name.trim() || selectedType,
+        ok: false,
+        latency_ms: 0,
+        error: err instanceof Error ? err.message : 'Connection test failed',
+      });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -446,15 +487,30 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
             Cancel
           </button>
           {selectedType && (
-            <button
-              type="submit"
-              form="remote-form"
-              disabled={saving}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 disabled:opacity-50"
-            >
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              {isEdit ? 'Save Remote' : 'Create Remote'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={saving || testing}
+                onClick={() => void handleTestConnection()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium bg-slate-800 hover:bg-slate-700 text-emerald-300 disabled:opacity-50"
+              >
+                {testing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Activity className="w-4 h-4" />
+                )}
+                Test Connection
+              </button>
+              <button
+                type="submit"
+                form="remote-form"
+                disabled={saving || testing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 disabled:opacity-50"
+              >
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {isEdit ? 'Save Remote' : 'Create Remote'}
+              </button>
+            </>
           )}
         </>
       }
@@ -490,7 +546,13 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
                 <button
                   key={p.name}
                   type="button"
-                  onClick={() => setSelectedType(p.name)}
+                  onClick={() => {
+                    if (p.name === 'crypt' && onSelectCryptWizard) {
+                      onSelectCryptWizard();
+                      return;
+                    }
+                    setSelectedType(p.name);
+                  }}
                   className="p-2.5 rounded-xl bg-slate-950 border border-emerald-500/20 hover:border-emerald-500/60 text-left transition-colors"
                 >
                   <div className="text-xs font-semibold text-slate-100">{p.label}</div>
@@ -515,7 +577,13 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
                 <button
                   key={p.Name}
                   type="button"
-                  onClick={() => setSelectedType(p.Name)}
+                  onClick={() => {
+                    if (p.Name === 'crypt' && onSelectCryptWizard) {
+                      onSelectCryptWizard();
+                      return;
+                    }
+                    setSelectedType(p.Name);
+                  }}
                   className="w-full flex items-center justify-between px-3.5 py-2.5 text-left hover:bg-slate-800/60 transition-colors"
                 >
                   <div className="min-w-0 pr-3">
@@ -542,6 +610,27 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
             </div>
           )}
 
+          {testResult && (
+            <div
+              className={`p-3 rounded-xl border text-xs flex items-start gap-2 ${
+                testResult.ok
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}
+            >
+              {testResult.ok ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              )}
+              <span className="break-words">
+                {testResult.ok
+                  ? `${testResult.message} (${testResult.latency_ms}ms)`
+                  : testResult.error}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1">
               <label className="block text-xs font-medium text-slate-300 mb-1">Remote Name *</label>
@@ -560,6 +649,8 @@ export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: 
                 onClick={() => {
                   setSelectedType('');
                   setValues({});
+                  setTestResult(null);
+                  setError('');
                 }}
                 className="mt-5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
               >

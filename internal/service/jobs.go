@@ -170,6 +170,23 @@ func (s *AppService) PreviewJobCommand(ctx context.Context, job domain.Job, dryR
 	return "rclone " + runner.FormatCommandPreview(args), nil
 }
 
+// DryRunDraftJob validates a draft job and executes an ephemeral dry run without saving it.
+func (s *AppService) DryRunDraftJob(ctx context.Context, job domain.Job) (runner.DraftDryRunResult, error) {
+	if strings.TrimSpace(job.Name) == "" {
+		job.Name = "Draft Dry Run"
+	}
+	// Do not block path/flag dry-run testing on an unfinished cron schedule input.
+	job.Schedule = ""
+	if err := ValidateJob(&job); err != nil {
+		return runner.DraftDryRunResult{}, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	settings, err := s.store.GetSettings(ctx, s.defaults)
+	if err != nil {
+		settings = s.defaults
+	}
+	return s.runner.DryRunDraft(ctx, job, settings)
+}
+
 // StopJob gracefully stops an active job run.
 func (s *AppService) StopJob(id string) error {
 	return s.runner.StopJob(id)

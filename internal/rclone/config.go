@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -228,6 +229,92 @@ func (c *Client) ImportConf(ctx context.Context, content, mode string) ([]string
 	c.confMu.Lock()
 	defer c.confMu.Unlock()
 	return MergeOrValidateINI(ctx, c.bin, c.confPath, content, mode)
+}
+
+// ReadRawConf returns the raw rclone.conf INI contents, or empty string if the file does not exist yet.
+func (c *Client) ReadRawConf(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	c.confMu.Lock()
+	defer c.confMu.Unlock()
+
+	raw, err := os.ReadFile(c.confPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// TestRemoteConfig tests connectivity for an unsaved or edited remote configuration
+// inside a temporary isolated copy of rclone.conf without mutating persisted config.
+func (c *Client) TestRemoteConfig(ctx context.Context, name, remoteType string, params map[string]string) (RemoteTestResult, error) {
+	remoteType = strings.TrimSpace(remoteType)
+	if remoteType == "" {
+		return RemoteTestResult{}, errors.New("remote type is required")
+	}
+
+	provs := c.providerMap(ctx)
+	if len(provs) > 0 {
+		if _, ok := provs[remoteType]; !ok {
+			return RemoteTestResult{}, fmt.Errorf("unknown remote provider type %q", remoteType)
+		}
+	}
+
+	for k := range params {
+		if k == "type" {
+			continue
+		}
+		if err := ValidateParamKey(k); err != nil {
+			return RemoteTestResult{}, err
+		}
+	}
+
+	tmpDir, err := os.MkdirTemp("", "rclone-test-draft-*")
+	if err != nil {
+		return RemoteTestResult{}, err
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	tmpConf := filepath.Join(tmpDir, "rclone.conf")
+	c.confMu.Lock()
+	rawConf, readErr := os.ReadFile(c.confPath)
+	c.confMu.Unlock()
+	if readErr == nil && len(rawConf) > 0 {
+		if writeErr := os.WriteFile(tmpConf, rawConf, 0o600); writeErr != nil {
+			return RemoteTestResult{}, writeErr
+		}
+	}
+
+	cleanName := strings.TrimSpace(name)
+	displayName := cleanName
+	if displayName == "" {
+		displayName = remoteType
+	}
+	testName := cleanName
+	if err := ValidateRemoteName(testName); err != nil {
+		testName = "__draft_test__"
+	}
+
+	tmpClient := NewClient(c.bin, tmpConf)
+	existing, err := tmpClient.dumpRaw(ctx)
+	if err != nil {
+		return RemoteTestResult{}, err
+	}
+	if _, exists := existing[testName]; exists {
+		if err := tmpClient.UpdateRemote(ctx, testName, params); err != nil {
+			return RemoteTestResult{}, err
+		}
+	} else {
+		if err := tmpClient.CreateRemote(ctx, testName, remoteType, params); err != nil {
+			return RemoteTestResult{}, err
+		}
+	}
+
+	return testRemoteWithConf(ctx, c.bin, tmpConf, testName, displayName), nil
 }
 
 func (c *Client) ensureRemoteExists(ctx context.Context, name string) error {
