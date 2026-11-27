@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -557,6 +558,102 @@ func TestAPIRemotesBrowseAndRestore(t *testing.T) {
 	keptBytes, err := os.ReadFile(filepath.Join(localRoot, "restored", "notes.txt"))
 	if err != nil || string(keptBytes) != "keep-local" {
 		t.Fatalf("expected skip mode to preserve local file, got %q err=%v", string(keptBytes), err)
+	}
+
+	// Browse file management: mkdir, multipart upload, size, rename, delete + root delete guard
+	mkdirBody, _ := json.Marshal(map[string]string{"remote": "myalias", "path": "managed"})
+	mkResp, err := client.Post(ts.URL+"/api/browse/mkdir", "application/json", bytes.NewReader(mkdirBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mkResp.Body.Close()
+	if mkResp.StatusCode != http.StatusCreated {
+		t.Fatalf("mkdir status = %d", mkResp.StatusCode)
+	}
+
+	var uploadBuf bytes.Buffer
+	mw := multipart.NewWriter(&uploadBuf)
+	fw, err := mw.CreateFormFile("file", "hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fw.Write([]byte("uploaded-bytes"))
+	_ = mw.Close()
+
+	upReq, err := http.NewRequest(http.MethodPost, ts.URL+"/api/browse/upload?remote=myalias&path=managed", &uploadBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upReq.Header.Set("Content-Type", mw.FormDataContentType())
+	upResp, err := client.Do(upReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = upResp.Body.Close()
+	if upResp.StatusCode != http.StatusCreated {
+		t.Fatalf("upload status = %d", upResp.StatusCode)
+	}
+
+	szResp, err := client.Get(ts.URL + "/api/browse/size?remote=myalias&path=managed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var szRes struct {
+		Count int64 `json:"count"`
+		Bytes int64 `json:"bytes"`
+	}
+	_ = json.NewDecoder(szResp.Body).Decode(&szRes)
+	_ = szResp.Body.Close()
+	if szRes.Count != 1 || szRes.Bytes != int64(len("uploaded-bytes")) {
+		t.Fatalf("unexpected DirSize result: %+v", szRes)
+	}
+
+	renBody, _ := json.Marshal(map[string]string{
+		"remote":   "myalias",
+		"path":     "managed/hello.txt",
+		"new_name": "renamed.txt",
+	})
+	renResp, err := client.Post(ts.URL+"/api/browse/rename", "application/json", bytes.NewReader(renBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = renResp.Body.Close()
+	if renResp.StatusCode != http.StatusOK {
+		t.Fatalf("rename status = %d", renResp.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(localRoot, "managed", "renamed.txt")); err != nil {
+		t.Fatalf("expected renamed file on disk: %v", err)
+	}
+
+	delFileReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/browse/entry?remote=myalias&path=managed/renamed.txt&is_dir=0", nil)
+	delFileResp, err := client.Do(delFileReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delFileResp.Body.Close()
+	if delFileResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete file status = %d", delFileResp.StatusCode)
+	}
+
+	delDirReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/browse/entry?remote=myalias&path=managed&is_dir=1", nil)
+	delDirResp, err := client.Do(delDirReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delDirResp.Body.Close()
+	if delDirResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete dir status = %d", delDirResp.StatusCode)
+	}
+
+	// Root deletion must always be rejected
+	delRootReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/browse/entry?remote=myalias&path=&is_dir=1", nil)
+	delRootResp, err := client.Do(delRootReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delRootResp.Body.Close()
+	if delRootResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 deleting root, got %d", delRootResp.StatusCode)
 	}
 }
 

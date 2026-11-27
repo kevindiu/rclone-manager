@@ -182,8 +182,10 @@ func ValidateJob(job *domain.Job) error {
 	if job.Operation == "" {
 		job.Operation = "sync"
 	}
-	if job.Operation != "copy" && job.Operation != "sync" {
-		return errors.New("operation must be 'copy' or 'sync'")
+	switch job.Operation {
+	case "copy", "sync", "move", "check":
+	default:
+		return errors.New("operation must be 'copy', 'sync', 'move', or 'check'")
 	}
 	if job.Schedule != "" {
 		if err := scheduler.ValidateCron(job.Schedule); err != nil {

@@ -19,6 +19,14 @@ export function JobOverridesTab({
   setBwlimit,
   customFlags,
   setCustomFlags,
+  fastList,
+  setFastList,
+  checksum,
+  setChecksum,
+  updateOnly,
+  setUpdateOnly,
+  serverSideAcrossConfigs,
+  setServerSideAcrossConfigs,
 }: {
   settings: GlobalSettings;
   transfers: string;
@@ -37,12 +45,89 @@ export function JobOverridesTab({
   setBwlimit: (v: string) => void;
   customFlags: string;
   setCustomFlags: (v: string) => void;
+  fastList: boolean;
+  setFastList: (v: boolean) => void;
+  checksum: boolean;
+  setChecksum: (v: boolean) => void;
+  updateOnly: boolean;
+  setUpdateOnly: (v: boolean) => void;
+  serverSideAcrossConfigs: boolean;
+  setServerSideAcrossConfigs: (v: boolean) => void;
 }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <Sparkles className="w-4 h-4 text-sky-400" />
-        Leave fields blank to inherit Global Settings defaults.
+        Leave numeric/text fields blank to inherit Global Settings defaults.
+      </div>
+
+      <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+        <div className="text-xs font-semibold uppercase tracking-wider text-sky-400">
+          Common rclone Options
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={fastList}
+              onChange={(e) => setFastList(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-sky-500"
+            />
+            <div>
+              <div className="text-xs font-mono font-medium text-slate-100">--fast-list</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Fewer API calls &amp; faster listing on S3, R2, B2, and Google Drive.
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={checksum}
+              onChange={(e) => setChecksum(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-sky-500"
+            />
+            <div>
+              <div className="text-xs font-mono font-medium text-slate-100">--checksum</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Compare file hashes &amp; sizes instead of modification timestamps.
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={updateOnly}
+              onChange={(e) => setUpdateOnly(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-sky-500"
+            />
+            <div>
+              <div className="text-xs font-mono font-medium text-slate-100">--update</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Skip destination files that are newer than the source file.
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={serverSideAcrossConfigs}
+              onChange={(e) => setServerSideAcrossConfigs(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-sky-500"
+            />
+            <div>
+              <div className="text-xs font-mono font-medium text-slate-100">
+                --server-side-across-configs
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Allow cloud-to-cloud server-side copy/move without downloading locally.
+              </p>
+            </div>
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -132,7 +217,7 @@ export function JobOverridesTab({
         <input
           value={customFlags}
           onChange={(e) => setCustomFlags(e.target.value)}
-          placeholder="--fast-list --tpslimit 10 --drive-chunk-size 64M"
+          placeholder="--tpslimit 10 --drive-chunk-size 64M"
           className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100 focus:outline-none focus:border-sky-500"
         />
       </div>

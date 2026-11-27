@@ -23,6 +23,7 @@ import { type Tab, useRoute } from './hooks/useRoute';
 import { useSSE } from './hooks/useSSE';
 import { useToast } from './hooks/useToast';
 import type {
+  ActiveRunSnapshot,
   AuthUser,
   GlobalSettings,
   JobRun,
@@ -164,6 +165,25 @@ export function App() {
     clearSessionState();
     showToast('Signed out');
   };
+
+  const openActiveRunLogs = useCallback((snap: ActiveRunSnapshot) => {
+    setLogRun({
+      id: snap.run_id,
+      job_id: snap.job_id,
+      job_name: snap.job_name,
+      trigger: snap.trigger,
+      dry_run: snap.dry_run,
+      status: snap.status,
+      started_at: snap.started_at,
+      duration_ms: 0,
+      bytes_transferred: snap.progress?.bytes ?? 0,
+      total_bytes: snap.progress?.total_bytes ?? 0,
+      files_transferred: snap.progress?.transfers ?? 0,
+      files_checked: snap.progress?.checks ?? 0,
+      files_deleted: snap.progress?.deletes ?? 0,
+      errors_count: snap.progress?.errors ?? 0,
+    });
+  }, []);
 
   if (authLoading) {
     return (
@@ -314,14 +334,19 @@ export function App() {
               systemInfo={systemInfo}
               onNavigate={navigate}
               onViewLogs={setLogRun}
+              onViewActiveLogs={openActiveRunLogs}
               onRefreshAll={() => void refreshCore()}
+              onToast={showToast}
             />
           )}
           {tab === 'jobs' && (
             <JobsPage
               jobs={jobs}
+              activeRuns={activeRuns}
               settings={settings}
               remotes={remotes}
+              onViewLogs={setLogRun}
+              onViewActiveLogs={openActiveRunLogs}
               onReload={() => void refreshCore()}
               onToast={showToast}
             />
@@ -341,6 +366,8 @@ export function App() {
               jobs={jobs}
               activeRuns={activeRuns}
               initialRemote={browseRemote}
+              onNavigate={navigate}
+              onViewActiveLogs={openActiveRunLogs}
               onToast={showToast}
             />
           )}

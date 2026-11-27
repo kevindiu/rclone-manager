@@ -24,15 +24,19 @@ type Job struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
-	Operation   string `json:"operation" yaml:"operation"` // "copy" | "sync"
+	Operation   string `json:"operation" yaml:"operation"` // "copy" | "sync" | "move" | "check"
 	Source      string `json:"source" yaml:"source"`
 	Destination string `json:"destination" yaml:"destination"`
 	Schedule    string `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 
-	ExcludePatterns []string `json:"exclude_patterns,omitempty" yaml:"exclude_patterns,omitempty"`
-	IncludePatterns []string `json:"include_patterns,omitempty" yaml:"include_patterns,omitempty"`
-	FilterRules     []string `json:"filter_rules,omitempty" yaml:"filter_rules,omitempty"`
-	CustomFlags     string   `json:"custom_flags,omitempty" yaml:"custom_flags,omitempty"`
+	ExcludePatterns         []string `json:"exclude_patterns,omitempty" yaml:"exclude_patterns,omitempty"`
+	IncludePatterns         []string `json:"include_patterns,omitempty" yaml:"include_patterns,omitempty"`
+	FilterRules             []string `json:"filter_rules,omitempty" yaml:"filter_rules,omitempty"`
+	CustomFlags             string   `json:"custom_flags,omitempty" yaml:"custom_flags,omitempty"`
+	FastList                bool     `json:"fast_list,omitempty" yaml:"fast_list,omitempty"`
+	Checksum                bool     `json:"checksum,omitempty" yaml:"checksum,omitempty"`
+	UpdateOnly              bool     `json:"update_only,omitempty" yaml:"update_only,omitempty"`
+	ServerSideAcrossConfigs bool     `json:"server_side_across_configs,omitempty" yaml:"server_side_across_configs,omitempty"`
 
 	MaxTransfer string `json:"max_transfer,omitempty" yaml:"max_transfer,omitempty"`
 	CutoffMode  string `json:"cutoff_mode,omitempty" yaml:"cutoff_mode,omitempty"` // "soft" | "hard" | "cautious"

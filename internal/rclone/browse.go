@@ -221,6 +221,160 @@ func (c *Client) StreamFile(ctx context.Context, remote, subpath string, w io.Wr
 	return nil
 }
 
+// MakeDir creates a directory at remote:subpath using `rclone mkdir`.
+func (c *Client) MakeDir(ctx context.Context, remote, subpath string) error {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return err
+	}
+	cleanSub, err := CleanSubpath(subpath)
+	if err != nil {
+		return err
+	}
+	if cleanSub == "" {
+		return errors.New("directory path is required")
+	}
+	target, err := FormatRemoteTarget(remote, cleanSub)
+	if err != nil {
+		return err
+	}
+	out, err := exec.CommandContext(ctx, c.bin, "--config", c.confPath, "mkdir", target).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mkdir failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
+	}
+	return nil
+}
+
+// UploadFile streams body directly to remote:subpath via `rclone rcat`.
+func (c *Client) UploadFile(ctx context.Context, remote, subpath string, body io.Reader) error {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return err
+	}
+	cleanSub, err := CleanSubpath(subpath)
+	if err != nil {
+		return err
+	}
+	if cleanSub == "" {
+		return errors.New("destination file path is required")
+	}
+	target, err := FormatRemoteTarget(remote, cleanSub)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, c.bin, "--config", c.confPath, "rcat", target)
+	cmd.Stdin = body
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("upload failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
+	}
+	return nil
+}
+
+// RenamePath renames or moves a file or folder within remote using `rclone moveto`.
+func (c *Client) RenamePath(ctx context.Context, remote, srcSubpath, dstSubpath string) error {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return err
+	}
+	cleanSrc, err := CleanSubpath(srcSubpath)
+	if err != nil {
+		return err
+	}
+	cleanDst, err := CleanSubpath(dstSubpath)
+	if err != nil {
+		return err
+	}
+	if cleanSrc == "" || cleanDst == "" {
+		return errors.New("source and destination paths are required")
+	}
+	if cleanSrc == cleanDst {
+		return errors.New("new name matches existing name")
+	}
+	srcTarget, err := FormatRemoteTarget(remote, cleanSrc)
+	if err != nil {
+		return err
+	}
+	dstTarget, err := FormatRemoteTarget(remote, cleanDst)
+	if err != nil {
+		return err
+	}
+	out, err := exec.CommandContext(ctx, c.bin, "--config", c.confPath, "moveto", srcTarget, dstTarget).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("rename failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
+	}
+	return nil
+}
+
+// DeletePath deletes a single file (`deletefile`) or recursive directory (`purge`) on remote.
+func (c *Client) DeletePath(ctx context.Context, remote, subpath string, isDir bool) error {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return err
+	}
+	cleanSub, err := CleanSubpath(subpath)
+	if err != nil {
+		return err
+	}
+	if cleanSub == "" {
+		return errors.New("refusing to delete remote root path")
+	}
+	target, err := FormatRemoteTarget(remote, cleanSub)
+	if err != nil {
+		return err
+	}
+	verb := "deletefile"
+	if isDir {
+		verb = "purge"
+	}
+	out, err := exec.CommandContext(ctx, c.bin, "--config", c.confPath, verb, target).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("delete failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
+	}
+	return nil
+}
+
+// DirSize calculates file count and byte total for remote:subpath via `rclone size --json`.
+func (c *Client) DirSize(ctx context.Context, remote, subpath string) (DirSize, error) {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return DirSize{}, err
+	}
+	target, err := FormatRemoteTarget(remote, subpath)
+	if err != nil {
+		return DirSize{}, err
+	}
+	sCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(sCtx, c.bin, "--config", c.confPath, "size", "--json", target)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return DirSize{}, fmt.Errorf("size check failed: %s", firstNonEmpty(strings.TrimSpace(stderr.String()), err.Error()))
+	}
+	var res DirSize
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		return DirSize{}, fmt.Errorf("parse size output: %w", err)
+	}
+	return res, nil
+}
+
+// CleanupRemote empties trash / expired versions on backends supporting `rclone cleanup`.
+func (c *Client) CleanupRemote(ctx context.Context, name string) error {
+	if err := c.ensureRemoteExists(ctx, name); err != nil {
+		return err
+	}
+	target, err := FormatRemoteTarget(name, "")
+	if err != nil {
+		return err
+	}
+	cCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(cCtx, c.bin, "--config", c.confPath, "cleanup", target).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("cleanup failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
+	}
+	return nil
+}
+
 // EnsureRemoteExists verifies that the named remote exists in rclone.conf.
 func (c *Client) EnsureRemoteExists(ctx context.Context, name string) error {
 	return c.ensureRemoteExists(ctx, name)

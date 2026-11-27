@@ -169,3 +169,57 @@ func TestBuildRcloneArgsRejectsManagedCustomFlags(t *testing.T) {
 		t.Fatalf("expected managed --config rejection error, got %v", err)
 	}
 }
+
+func TestBuildRcloneArgsMoveCheckAndCommonFlags(t *testing.T) {
+	defaults := domain.GlobalSettings{Transfers: 4, Checkers: 8}
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+
+	moveArgs, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:               "move",
+		Source:                  "/src",
+		Destination:             "r2:dst",
+		FastList:                true,
+		Checksum:                true,
+		UpdateOnly:              true,
+		ServerSideAcrossConfigs: true,
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatalf("BuildRcloneArgs move failed: %v", err)
+	}
+	for _, flag := range []string{"move", "--fast-list", "--checksum", "--update", "--server-side-across-configs"} {
+		if !slices.Contains(moveArgs, flag) {
+			t.Errorf("expected %q in move args: %v", flag, moveArgs)
+		}
+	}
+
+	maxDel := 10
+	checkArgs, backupBase, datedBackupDir, err := BuildRcloneArgs(domain.Job{
+		Operation:               "check",
+		Source:                  "/src",
+		Destination:             "r2:dst",
+		FastList:                true,
+		Checksum:                true,
+		UpdateOnly:              true,
+		ServerSideAcrossConfigs: true,
+		VersioningEnabled:       true,
+		MaxDelete:               &maxDel,
+		MaxTransfer:             "10G",
+		ExcludePatterns:         []string{"*.tmp"},
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatalf("BuildRcloneArgs check failed: %v", err)
+	}
+	if backupBase != "" || datedBackupDir != "" {
+		t.Fatalf("check should not emit backup dirs, got base=%q dated=%q", backupBase, datedBackupDir)
+	}
+	for _, flag := range []string{"check", "--fast-list", "--checksum", "--server-side-across-configs", "--exclude"} {
+		if !slices.Contains(checkArgs, flag) {
+			t.Errorf("expected %q in check args: %v", flag, checkArgs)
+		}
+	}
+	for _, forbidden := range []string{"--backup-dir", "--max-delete", "--max-transfer", "--update"} {
+		if slices.Contains(checkArgs, forbidden) {
+			t.Errorf("check must omit %q: %v", forbidden, checkArgs)
+		}
+	}
+}

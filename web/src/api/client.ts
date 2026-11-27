@@ -3,6 +3,7 @@ import type {
   AuthStatus,
   AuthUser,
   BrowseEntry,
+  DirSize,
   FileVersion,
   GlobalSettings,
   Job,
@@ -128,6 +129,10 @@ export const api = {
     }),
   aboutRemote: (name: string) =>
     request<RemoteAbout>(`/api/remotes/${encodeURIComponent(name)}/about`),
+  cleanupRemote: (name: string) =>
+    request<{ name: string; status: string }>(`/api/remotes/${encodeURIComponent(name)}/cleanup`, {
+      method: 'POST',
+    }),
 
   // Jobs
   listJobs: () => request<JobWithStatus[]>('/api/jobs'),
@@ -204,6 +209,40 @@ export const api = {
   browse: (remote: string, path = '') =>
     request<{ remote: string; path: string; entries: BrowseEntry[] }>(
       `/api/browse?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`
+    ),
+  browseLocal: (path = '/') =>
+    request<{ path: string; entries: BrowseEntry[] }>(
+      `/api/browse/local?path=${encodeURIComponent(path)}`
+    ),
+  browseSize: (remote: string, path = '') =>
+    request<DirSize>(
+      `/api/browse/size?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`
+    ),
+  browseMkdir: (remote: string, path: string) =>
+    request<{ status: string }>('/api/browse/mkdir', {
+      method: 'POST',
+      body: JSON.stringify({ remote, path }),
+    }),
+  browseUpload: (remote: string, dirPath: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return request<{ status: string; path: string; name: string }>(
+      `/api/browse/upload?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(dirPath)}`,
+      {
+        method: 'POST',
+        body: fd,
+      }
+    );
+  },
+  browseRename: (remote: string, path: string, new_name: string) =>
+    request<{ status: string; path: string }>('/api/browse/rename', {
+      method: 'POST',
+      body: JSON.stringify({ remote, path, new_name }),
+    }),
+  browseDelete: (remote: string, path: string, is_dir: boolean) =>
+    request<{ status: string }>(
+      `/api/browse/entry?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}&is_dir=${is_dir ? '1' : '0'}`,
+      { method: 'DELETE' }
     ),
   downloadUrl: (remote: string, path: string) =>
     `/api/browse/download?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`,

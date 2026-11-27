@@ -104,3 +104,9 @@ type VersionRootCandidate struct {
 	BackupRoot string
 	RelPath    string
 }
+
+// DirSize reports file count and total size for a remote directory via `rclone size --json`.
+type DirSize struct {
+	Count int64 `json:"count"`
+	Bytes int64 `json:"bytes"`
+}

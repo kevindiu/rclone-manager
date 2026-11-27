@@ -356,7 +356,7 @@ func TestValidateJobAndJobsLifecycle(t *testing.T) {
 		{Name: "", Source: "/a", Destination: "/b"},
 		{Name: "NoSrc", Source: "", Destination: "/b"},
 		{Name: "NoDst", Source: "/a", Destination: ""},
-		{Name: "BadOp", Source: "/a", Destination: "/b", Operation: "move"},
+		{Name: "BadOp", Source: "/a", Destination: "/b", Operation: "bisync"},
 		{Name: "BadCron", Source: "/a", Destination: "/b", Schedule: "bad cron"},
 		{Name: "BadCutoff", Source: "/a", Destination: "/b", CutoffMode: "instant"},
 		{Name: "BadFlag", Source: "/a", Destination: "/b", CustomFlags: "--rc"},
@@ -393,6 +393,15 @@ func TestValidateJobAndJobsLifecycle(t *testing.T) {
 
 	created.Name = "Docs Copy"
 	created.Operation = "copy"
+	if _, err := svc.UpdateJob(ctx, created.ID, *created); err != nil {
+		t.Fatalf("UpdateJob copy failed: %v", err)
+	}
+	for _, validOp := range []string{"move", "check"} {
+		j := domain.Job{Name: "Op-" + validOp, Operation: validOp, Source: "/src", Destination: "r2:dst"}
+		if err := ValidateJob(&j); err != nil {
+			t.Fatalf("ValidateJob(%s) failed: %v", validOp, err)
+		}
+	}
 	updated, err := svc.UpdateJob(ctx, created.ID, *created)
 	if err != nil || updated.Name != "Docs Copy" {
 		t.Fatalf("UpdateJob failed: updated=%+v err=%v", updated, err)
@@ -451,5 +460,47 @@ func TestReadRunLogsEdgeCases(t *testing.T) {
 	}
 	if !res.Lines[0].IsStats || res.Lines[1].Msg != "plain text message" {
 		t.Fatalf("unexpected parsed log lines: %+v", res.Lines)
+	}
+}
+
+func TestListLocalDirs(t *testing.T) {
+	svc, _, _, _, _, _ := newTestService()
+
+	if _, _, err := svc.ListLocalDirs("relative/path"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation for relative path, got %v", err)
+	}
+	if _, _, err := svc.ListLocalDirs(filepath.Join(t.TempDir(), "missing")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist for missing path, got %v", err)
+	}
+
+	root := t.TempDir()
+	for _, name := range []string{"zeta", "Alpha", ".hidden"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := t.TempDir()
+	if err := os.Symlink(targetDir, filepath.Join(root, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	clean, dirs, err := svc.ListLocalDirs(root + "/")
+	if err != nil {
+		t.Fatalf("ListLocalDirs: %v", err)
+	}
+	if clean != filepath.Clean(root) {
+		t.Fatalf("expected clean path %q, got %q", filepath.Clean(root), clean)
+	}
+	if len(dirs) != 4 {
+		t.Fatalf("expected 4 dirs (excluding file.txt), got %+v", dirs)
+	}
+	wantOrder := []string{"Alpha", "linkdir", "zeta", ".hidden"}
+	for i, want := range wantOrder {
+		if dirs[i].Name != want || !dirs[i].IsDir {
+			t.Fatalf("entry %d = %+v, want Name=%q IsDir=true", i, dirs[i], want)
+		}
 	}
 }

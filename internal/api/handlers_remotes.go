@@ -134,3 +134,16 @@ func (s *Server) handleAboutRemote(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+func (s *Server) handleCleanupRemote(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.client.CleanupRemote(r.Context(), name); err != nil {
+		if errors.Is(err, rclone.ErrRemoteNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"name": name, "status": "cleaned"})
+}

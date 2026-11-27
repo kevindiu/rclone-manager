@@ -32,7 +32,9 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
   const [name, setName] = useState(job?.name ?? '');
   const [description, setDescription] = useState(job?.description ?? '');
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
-  const [operation, setOperation] = useState<'copy' | 'sync'>(job?.operation ?? 'sync');
+  const [operation, setOperation] = useState<'copy' | 'sync' | 'move' | 'check'>(
+    job?.operation ?? 'sync'
+  );
   const [source, setSource] = useState(job?.source ?? '');
   const [destination, setDestination] = useState(job?.destination ?? '');
   const [schedule, setSchedule] = useState(job?.schedule ?? '');
@@ -75,6 +77,12 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
   const [timeout, setTimeoutVal] = useState(job?.timeout ?? '');
   const [contimeout, setContimeout] = useState(job?.contimeout ?? '');
   const [customFlags, setCustomFlags] = useState(job?.custom_flags ?? '');
+  const [fastList, setFastList] = useState(job?.fast_list ?? false);
+  const [checksum, setChecksum] = useState(job?.checksum ?? false);
+  const [updateOnly, setUpdateOnly] = useState(job?.update_only ?? false);
+  const [serverSideAcrossConfigs, setServerSideAcrossConfigs] = useState(
+    job?.server_side_across_configs ?? false
+  );
 
   const [cronPreview, setCronPreview] = useState<string[]>([]);
   const [cronError, setCronError] = useState('');
@@ -123,6 +131,27 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      setTab('basics');
+      setError('Job Name is required.');
+      return;
+    }
+    if (!source.trim()) {
+      setTab('basics');
+      setError('Source Path is required.');
+      return;
+    }
+    if (!destination.trim()) {
+      setTab('basics');
+      setError('Destination Path is required.');
+      return;
+    }
+    if (cronError) {
+      setTab('schedule');
+      setError(cronError);
+      return;
+    }
+
     setSaving(true);
     setError('');
     try {
@@ -154,6 +183,10 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
         low_level_retries: parseOptInt(lowLevelRetries),
         timeout: timeout.trim(),
         contimeout: contimeout.trim(),
+        fast_list: fastList,
+        checksum,
+        update_only: updateOnly,
+        server_side_across_configs: serverSideAcrossConfigs,
       };
 
       if (isEdit && job?.id) {
@@ -170,12 +203,35 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
     }
   };
 
-  const tabs: { key: TabKey; label: string }[] = [
+  const hasGuards =
+    abortIfSourceEmpty ||
+    requiredMarkerFile.trim() !== '' ||
+    maxDelete.trim() !== '' ||
+    maxTransfer.trim() !== '' ||
+    excludesText.trim() !== '' ||
+    includesText.trim() !== '' ||
+    filtersText.trim() !== '';
+
+  const hasOverrides =
+    transfers.trim() !== '' ||
+    checkers.trim() !== '' ||
+    retries.trim() !== '' ||
+    lowLevelRetries.trim() !== '' ||
+    timeout.trim() !== '' ||
+    contimeout.trim() !== '' ||
+    bwlimit.trim() !== '' ||
+    customFlags.trim() !== '' ||
+    fastList ||
+    checksum ||
+    updateOnly ||
+    serverSideAcrossConfigs;
+
+  const tabs: { key: TabKey; label: string; activeDot?: boolean }[] = [
     { key: 'basics', label: 'Basics' },
-    { key: 'schedule', label: 'Schedule' },
-    { key: 'versioning', label: 'Versioning' },
-    { key: 'guards', label: 'Filters & Guards' },
-    { key: 'overrides', label: 'Overrides' },
+    { key: 'schedule', label: 'Schedule', activeDot: schedule.trim() !== '' },
+    { key: 'versioning', label: 'Versioning', activeDot: versioningEnabled },
+    { key: 'guards', label: 'Filters & Guards', activeDot: hasGuards },
+    { key: 'overrides', label: 'Overrides', activeDot: hasOverrides },
   ];
 
   return (
@@ -206,7 +262,7 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
           </>
         }
       >
-        <form id="job-editor-form" onSubmit={handleSave} className="space-y-4">
+        <form id="job-editor-form" noValidate onSubmit={handleSave} className="space-y-4">
           {error && (
             <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
               {error}
@@ -219,13 +275,14 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
                   tab === t.key
                     ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
                 {t.label}
+                {t.activeDot && <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />}
               </button>
             ))}
           </div>
@@ -313,6 +370,14 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
               setBwlimit={setBwlimit}
               customFlags={customFlags}
               setCustomFlags={setCustomFlags}
+              fastList={fastList}
+              setFastList={setFastList}
+              checksum={checksum}
+              setChecksum={setChecksum}
+              updateOnly={updateOnly}
+              setUpdateOnly={setUpdateOnly}
+              serverSideAcrossConfigs={serverSideAcrossConfigs}
+              setServerSideAcrossConfigs={setServerSideAcrossConfigs}
             />
           )}
         </form>

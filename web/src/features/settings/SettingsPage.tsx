@@ -1,4 +1,15 @@
-import { Bell, Download, KeyRound, Loader2, Save, Send, Server, Upload } from 'lucide-react';
+import {
+  Bell,
+  Download,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Save,
+  Send,
+  Server,
+  Upload,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import type { AuthUser, GlobalSettings, SystemInfo } from '../../types/api';
@@ -26,7 +37,22 @@ export function SettingsPage({
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+
+  const hasUnsavedChanges =
+    form.transfers !== settings.transfers ||
+    form.checkers !== settings.checkers ||
+    form.bwlimit !== settings.bwlimit ||
+    form.retries !== settings.retries ||
+    form.low_level_retries !== settings.low_level_retries ||
+    form.timeout !== settings.timeout ||
+    form.contimeout !== settings.contimeout ||
+    form.log_retention_days !== settings.log_retention_days ||
+    form.timezone !== settings.timezone ||
+    form.max_concurrent_jobs !== settings.max_concurrent_jobs ||
+    (form.webhook_url ?? '') !== (settings.webhook_url ?? '') ||
+    (form.webhook_on || 'failure') !== (settings.webhook_on || 'failure');
 
   useEffect(() => {
     setForm(settings);
@@ -322,7 +348,8 @@ export function SettingsPage({
           </div>
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-3">
+          {hasUnsavedChanges && <span className="text-xs text-amber-300">Unsaved changes</span>}
           <button
             type="submit"
             disabled={saving}
@@ -419,11 +446,21 @@ export function SettingsPage({
               Update your administrator password. Updating it revokes other signed-in sessions.
             </p>
           </div>
-          {currentUser && (
-            <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
-              {currentUser.username}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPasswords((v) => !v)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+            >
+              {showPasswords ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              {showPasswords ? 'Hide' : 'Show'}
+            </button>
+            {currentUser && (
+              <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
+                {currentUser.username}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -436,7 +473,7 @@ export function SettingsPage({
             </label>
             <input
               id="settings-current-password"
-              type="password"
+              type={showPasswords ? 'text' : 'password'}
               autoComplete="current-password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
@@ -453,7 +490,7 @@ export function SettingsPage({
             </label>
             <input
               id="settings-new-password"
-              type="password"
+              type={showPasswords ? 'text' : 'password'}
               autoComplete="new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -470,7 +507,7 @@ export function SettingsPage({
             </label>
             <input
               id="settings-confirm-password"
-              type="password"
+              type={showPasswords ? 'text' : 'password'}
               autoComplete="new-password"
               value={confirmNewPassword}
               onChange={(e) => setConfirmNewPassword(e.target.value)}

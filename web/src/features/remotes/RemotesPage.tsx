@@ -2,6 +2,7 @@ import {
   Activity,
   CheckCircle2,
   Edit3,
+  Eraser,
   FolderOpen,
   HardDrive,
   Loader2,
@@ -39,6 +40,8 @@ export function RemotesPage({
   const [loadingAbout, setLoadingAbout] = useState<Record<string, boolean>>({});
   const [confirmDeleteRemote, setConfirmDeleteRemote] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [confirmCleanupRemote, setConfirmCleanupRemote] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
 
   const runTest = async (name: string) => {
     setTesting((p) => ({ ...p, [name]: true }));
@@ -83,6 +86,22 @@ export function RemotesPage({
       onToast(err instanceof Error ? err.message : 'Delete failed', true);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleCleanup = async (name: string) => {
+    setCleaning(true);
+    try {
+      await api.cleanupRemote(name);
+      onToast(`Emptied trash on "${name}"`);
+      setConfirmCleanupRemote(null);
+    } catch (err) {
+      onToast(
+        err instanceof Error ? err.message : 'Cleanup failed or unsupported on this backend',
+        true
+      );
+    } finally {
+      setCleaning(false);
     }
   };
 
@@ -273,6 +292,15 @@ export function RemotesPage({
                     )}
                     Check Quota
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCleanupRemote(rem.name)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
+                    title="Run rclone cleanup (empties trash on supported backends)"
+                  >
+                    <Eraser className="w-3.5 h-3.5 text-amber-400" />
+                    Empty Trash
+                  </button>
                 </div>
               </div>
             );
@@ -309,6 +337,17 @@ export function RemotesPage({
           busy={deleting}
           onCancel={() => setConfirmDeleteRemote(null)}
           onConfirm={() => void handleDelete(confirmDeleteRemote)}
+        />
+      )}
+
+      {confirmCleanupRemote && (
+        <ConfirmModal
+          title="Empty Remote Trash"
+          message={`Run "rclone cleanup" on "${confirmCleanupRemote}"? This permanently empties trash or old backend versions where supported (e.g. Google Drive, B2).`}
+          confirmLabel="Empty Trash"
+          busy={cleaning}
+          onCancel={() => setConfirmCleanupRemote(null)}
+          onConfirm={() => void handleCleanup(confirmCleanupRemote)}
         />
       )}
     </div>

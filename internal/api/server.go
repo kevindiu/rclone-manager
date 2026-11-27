@@ -109,6 +109,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/remotes/import-conf", s.handleImportConf)
 	s.mux.HandleFunc("POST /api/remotes/{name}/test", s.handleTestRemote)
 	s.mux.HandleFunc("GET /api/remotes/{name}/about", s.handleAboutRemote)
+	s.mux.HandleFunc("POST /api/remotes/{name}/cleanup", s.handleCleanupRemote)
 
 	// Jobs & Cron
 	s.mux.HandleFunc("GET /api/jobs", s.handleListJobs)
@@ -130,6 +131,12 @@ func (s *Server) registerRoutes() {
 
 	// File Browser & Restore
 	s.mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	s.mux.HandleFunc("GET /api/browse/local", s.handleBrowseLocal)
+	s.mux.HandleFunc("GET /api/browse/size", s.handleBrowseSize)
+	s.mux.HandleFunc("POST /api/browse/mkdir", s.handleBrowseMkdir)
+	s.mux.HandleFunc("POST /api/browse/upload", s.handleBrowseUpload)
+	s.mux.HandleFunc("POST /api/browse/rename", s.handleBrowseRename)
+	s.mux.HandleFunc("DELETE /api/browse/entry", s.handleBrowseDelete)
 	s.mux.HandleFunc("GET /api/browse/download", s.handleBrowseDownload)
 	s.mux.HandleFunc("GET /api/browse/versions", s.handleBrowseVersions)
 	s.mux.HandleFunc("POST /api/browse/restore", s.handleBrowseRestore)

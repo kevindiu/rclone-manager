@@ -12,7 +12,9 @@ import (
 // BuildRcloneArgs constructs the complete argument list for an rclone job execution.
 func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath string, dryRun bool, nowLocal time.Time) (args []string, backupBase string, datedBackupDir string, err error) {
 	op := job.Operation
-	if op != "copy" && op != "sync" && op != "copyto" {
+	switch op {
+	case "copy", "sync", "move", "check", "copyto":
+	default:
 		op = "sync"
 	}
 
@@ -87,7 +89,7 @@ func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath st
 		args = append(args, "--contimeout", conTimeout)
 	}
 
-	if strings.TrimSpace(job.MaxTransfer) != "" {
+	if strings.TrimSpace(job.MaxTransfer) != "" && op != "check" {
 		args = append(args, "--max-transfer", strings.TrimSpace(job.MaxTransfer))
 		cutoff := strings.TrimSpace(job.CutoffMode)
 		if cutoff == "" {
@@ -96,12 +98,25 @@ func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath st
 		args = append(args, "--cutoff-mode="+cutoff)
 	}
 
-	if job.MaxDelete != nil && *job.MaxDelete >= 0 {
+	if job.MaxDelete != nil && *job.MaxDelete >= 0 && op != "check" {
 		args = append(args, "--max-delete", strconv.Itoa(*job.MaxDelete))
 	}
 
+	if job.FastList {
+		args = append(args, "--fast-list")
+	}
+	if job.Checksum {
+		args = append(args, "--checksum")
+	}
+	if job.UpdateOnly && op != "check" {
+		args = append(args, "--update")
+	}
+	if job.ServerSideAcrossConfigs {
+		args = append(args, "--server-side-across-configs")
+	}
+
 	// Incremental --backup-dir versioning
-	if job.VersioningEnabled {
+	if job.VersioningEnabled && op != "check" {
 		backupBase = strings.TrimSpace(job.BackupDirBase)
 		if backupBase == "" {
 			backupBase = joinRclonePath(job.Destination, "_versions")

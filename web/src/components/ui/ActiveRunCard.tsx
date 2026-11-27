@@ -1,4 +1,4 @@
-import { Square } from 'lucide-react';
+import { Square, Terminal } from 'lucide-react';
 import type { ActiveRunSnapshot } from '../../types/api';
 import { formatBytes, formatETA, formatSpeed } from '../../utils/format';
 import { StatusBadge } from './StatusBadge';
@@ -6,10 +6,12 @@ import { StatusBadge } from './StatusBadge';
 export function ActiveRunCard({
   run,
   onStop,
+  onViewLogs,
   variant = 'backup',
 }: {
   run: ActiveRunSnapshot;
   onStop: (jobId: string) => void;
+  onViewLogs?: (run: ActiveRunSnapshot) => void;
   variant?: 'backup' | 'restore';
 }) {
   const p = run.progress;
@@ -29,16 +31,31 @@ export function ActiveRunCard({
           </span>
           <StatusBadge status={run.status} dryRun={run.dry_run} />
         </div>
-        <button
-          type="button"
-          onClick={() => onStop(run.job_id)}
-          className={`inline-flex items-center gap-1.5 px-3 ${
-            isRestore ? 'py-1' : 'py-1.5'
-          } rounded-lg text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30`}
-        >
-          <Square className={`${isRestore ? 'w-3 h-3' : 'w-3.5 h-3.5'} fill-current`} />
-          Stop
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onViewLogs && (
+            <button
+              type="button"
+              onClick={() => onViewLogs(run)}
+              className={`inline-flex items-center gap-1.5 px-2.5 ${
+                isRestore ? 'py-1' : 'py-1.5'
+              } rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200`}
+              title="View live logs"
+            >
+              <Terminal className={`${isRestore ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-sky-400`} />
+              Logs
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onStop(run.job_id)}
+            className={`inline-flex items-center gap-1.5 px-3 ${
+              isRestore ? 'py-1' : 'py-1.5'
+            } rounded-lg text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30`}
+          >
+            <Square className={`${isRestore ? 'w-3 h-3' : 'w-3.5 h-3.5'} fill-current`} />
+            Stop
+          </button>
+        </div>
       </div>
 
       <div>

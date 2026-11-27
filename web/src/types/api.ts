@@ -18,7 +18,7 @@ export interface Job {
   name: string;
   description?: string;
   enabled: boolean;
-  operation: 'copy' | 'sync';
+  operation: 'copy' | 'sync' | 'move' | 'check';
   source: string;
   destination: string;
   schedule?: string;
@@ -26,6 +26,10 @@ export interface Job {
   include_patterns?: string[];
   filter_rules?: string[];
   custom_flags?: string;
+  fast_list?: boolean;
+  checksum?: boolean;
+  update_only?: boolean;
+  server_side_across_configs?: boolean;
   max_transfer?: string;
   cutoff_mode?: 'soft' | 'hard' | 'cautious' | '';
   versioning_enabled: boolean;
@@ -174,6 +178,13 @@ export interface BrowseEntry {
   MimeType?: string;
   ModTime?: string;
   IsDir: boolean;
+}
+
+export interface DirSize {
+  remote: string;
+  path: string;
+  count: number;
+  bytes: number;
 }
 
 export type RestoreConflictMode = 'overwrite' | 'skip' | 'newer_only';

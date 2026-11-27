@@ -22,7 +22,9 @@ export function DashboardPage({
   systemInfo,
   onNavigate,
   onViewLogs,
+  onViewActiveLogs,
   onRefreshAll,
+  onToast,
 }: {
   activeRuns: ActiveRunSnapshot[];
   jobs: JobWithStatus[];
@@ -31,11 +33,33 @@ export function DashboardPage({
   systemInfo: SystemInfo | null;
   onNavigate: (tab: Tab, opts?: { remote?: string }) => void;
   onViewLogs: (run: JobRun) => void;
+  onViewActiveLogs: (run: ActiveRunSnapshot) => void;
   onRefreshAll: () => void;
+  onToast: (msg: string, isError?: boolean) => void;
 }) {
   const [aboutMap, setAboutMap] = useState<Record<string, RemoteAbout>>({});
   const [loadingAbout, setLoadingAbout] = useState<Record<string, boolean>>({});
   const fetchedRef = useRef<Set<string>>(new Set());
+
+  const handleStop = async (jobId: string) => {
+    try {
+      await api.stopJob(jobId);
+      onToast('Stopping job...');
+      onRefreshAll();
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to stop job', true);
+    }
+  };
+
+  const handleRunNow = async (job: JobWithStatus) => {
+    try {
+      await api.runJob(job.id, false);
+      onToast(`Started "${job.name}"`);
+      onRefreshAll();
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to start job', true);
+    }
+  };
 
   const fetchAbout = useCallback(async (name: string) => {
     setLoadingAbout((p) => ({ ...p, [name]: true }));
@@ -128,6 +152,38 @@ export function DashboardPage({
         </div>
       </div>
 
+      {/* Quick Onboarding when freshly installed */}
+      {remotes.length === 0 && jobs.length === 0 && (
+        <section className="p-5 rounded-2xl bg-sky-500/10 border border-sky-500/30 space-y-3">
+          <div className="text-sm font-semibold text-sky-200">Getting Started</div>
+          <p className="text-xs text-slate-300">
+            Set up your first cloud remote and scheduled backup job in two quick steps:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => onNavigate('remotes')}
+              className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-sky-500/50 text-left transition-colors"
+            >
+              <div className="text-xs font-semibold text-sky-300">1. Add a Storage Remote</div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Connect S3, R2, Google Drive, OneDrive, SFTP, or import an existing rclone.conf.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('jobs')}
+              className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-sky-500/50 text-left transition-colors"
+            >
+              <div className="text-xs font-semibold text-emerald-300">2. Create a Backup Job</div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Pick local or remote folders, choose Copy or Sync, and set a cron schedule.
+              </p>
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Live Transfers */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
@@ -163,7 +219,8 @@ export function DashboardPage({
               <ActiveRunCard
                 key={run.run_id}
                 run={run}
-                onStop={(jobId) => void api.stopJob(jobId)}
+                onViewLogs={onViewActiveLogs}
+                onStop={(jobId) => void handleStop(jobId)}
               />
             ))}
           </div>
@@ -276,7 +333,7 @@ export function DashboardPage({
                   </div>
                   <button
                     type="button"
-                    onClick={() => void api.runJob(j.id, false)}
+                    onClick={() => void handleRunNow(j)}
                     disabled={j.is_running}
                     className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 disabled:opacity-40"
                     title="Run now"
