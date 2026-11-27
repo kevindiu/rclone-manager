@@ -1,0 +1,10 @@
+.git
+data
+bin
+rclone-manager
+web/node_modules
+web/dist
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

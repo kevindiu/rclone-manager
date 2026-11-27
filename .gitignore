@@ -1,0 +1,23 @@
+# Binaries & build artifacts
+/rclone-manager
+/bin/
+/dist/
+
+# Local runtime data
+/data/
+*.db
+*.db-wal
+*.db-shm
+rclone.conf
+
+# Frontend dependencies & build output
+/web/node_modules/
+/web/dist/*
+!/web/dist/.keep
+
+# OS & editor files
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
