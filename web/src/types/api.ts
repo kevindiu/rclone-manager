@@ -9,6 +9,8 @@ export interface GlobalSettings {
   log_retention_days: number;
   timezone: string;
   max_concurrent_jobs: number;
+  webhook_url?: string;
+  webhook_on?: 'off' | 'failure' | 'always' | '';
 }
 
 export interface Job {
@@ -55,7 +57,7 @@ export interface JobRun {
   id: string;
   job_id: string;
   job_name: string;
-  trigger: 'manual' | 'schedule' | 'dry_run' | string;
+  trigger: 'manual' | 'schedule' | 'dry_run' | 'restore' | 'restore_dry_run' | string;
   dry_run: boolean;
   status: 'queued' | 'running' | 'success' | 'failed' | 'cancelled' | 'skipped' | string;
   started_at: string;

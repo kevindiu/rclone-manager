@@ -14,8 +14,8 @@ import (
 )
 
 // ListRuns lists historical job runs.
-func (s *AppService) ListRuns(ctx context.Context, jobID, status string, limit, offset int) ([]domain.JobRun, int, error) {
-	return s.store.ListRuns(ctx, jobID, status, limit, offset)
+func (s *AppService) ListRuns(ctx context.Context, jobID, status, trigger string, limit, offset int) ([]domain.JobRun, int, error) {
+	return s.store.ListRuns(ctx, jobID, status, trigger, limit, offset)
 }
 
 // GetRun returns a single job run.

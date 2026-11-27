@@ -50,6 +50,7 @@ Open `http://localhost:8080` in your browser.
 - **Interactive setup**: On your first visit, you will be prompted to create an administrator username and password (minimum 8 characters).
 - **Automatic setup (optional)**: Set `RCLONE_MANAGER_ADMIN_USER` and `RCLONE_MANAGER_ADMIN_PASSWORD` on initial startup to create the account automatically when starting with an empty database.
 - **Change password**: Once signed in, update your password anytime under **Settings -> Account Security**.
+- **Forgot password**: Reset it from the container CLI with `docker exec -i rclone-manager /usr/local/bin/rclone-manager reset-password` (or pass `-password <new-password>`).
 
 ## Environment Variables
 

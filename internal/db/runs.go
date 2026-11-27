@@ -20,7 +20,7 @@ func (s *Store) CreateRun(ctx context.Context, run domain.JobRun) error {
 	}
 	var finishedAt sql.NullString
 	if run.FinishedAt != nil {
-		finishedAt = sql.NullString{String: run.FinishedAt.UTC().Format(time.RFC3339Nano), Valid: true}
+		finishedAt = sql.NullString{String: formatSQLiteTime(*run.FinishedAt), Valid: true}
 	}
 
 	_, err = s.db.ExecContext(ctx, `
@@ -32,7 +32,7 @@ INSERT INTO job_runs (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		run.ID, run.JobID, run.JobName, run.Trigger, boolToInt(run.DryRun), run.Status,
-		run.StartedAt.UTC().Format(time.RFC3339Nano), finishedAt,
+		formatSQLiteTime(run.StartedAt), finishedAt,
 		run.DurationMs, run.BytesTransferred, run.TotalBytes, run.FilesTransferred,
 		run.FilesChecked, run.FilesDeleted, run.ErrorsCount, run.ErrorMessage,
 		run.CommandPreview, run.LogFile, run.BackupDirUsed, string(prunedBytes),
@@ -48,7 +48,7 @@ func (s *Store) UpdateRun(ctx context.Context, run domain.JobRun) error {
 	}
 	var finishedAt sql.NullString
 	if run.FinishedAt != nil {
-		finishedAt = sql.NullString{String: run.FinishedAt.UTC().Format(time.RFC3339Nano), Valid: true}
+		finishedAt = sql.NullString{String: formatSQLiteTime(*run.FinishedAt), Valid: true}
 	}
 
 	_, err = s.db.ExecContext(ctx, `
@@ -87,8 +87,8 @@ FROM job_runs WHERE id = ?
 	return &run, nil
 }
 
-// ListRuns returns job runs ordered newest-first, optionally filtered by jobID and status.
-func (s *Store) ListRuns(ctx context.Context, jobID, status string, limit, offset int) ([]domain.JobRun, int, error) {
+// ListRuns returns job runs ordered newest-first, optionally filtered by jobID, status, and trigger.
+func (s *Store) ListRuns(ctx context.Context, jobID, status, trigger string, limit, offset int) ([]domain.JobRun, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -108,6 +108,10 @@ func (s *Store) ListRuns(ctx context.Context, jobID, status string, limit, offse
 	if status != "" {
 		conditions = append(conditions, "status = ?")
 		args = append(args, status)
+	}
+	if trigger != "" {
+		conditions = append(conditions, "trigger = ?")
+		args = append(args, trigger)
 	}
 
 	whereClause := ""
@@ -199,7 +203,7 @@ func (s *Store) DeleteRun(ctx context.Context, id string) error {
 // MarkInterruptedRunsFailed recovers from an unclean shutdown by marking any
 // queued or running job runs as failed.
 func (s *Store) MarkInterruptedRunsFailed(ctx context.Context) (int64, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := formatSQLiteTime(time.Now().UTC())
 	res, err := s.db.ExecContext(ctx, `
 UPDATE job_runs
 SET status = 'failed',
@@ -222,7 +226,7 @@ func (s *Store) PruneOldRuns(ctx context.Context, retentionDays int) (int64, err
 	if retentionDays <= 0 {
 		return 0, nil
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339Nano)
+	cutoff := formatSQLiteTime(time.Now().UTC().AddDate(0, 0, -retentionDays))
 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, log_file FROM job_runs
@@ -295,11 +299,11 @@ func scanRun(row scanner) (domain.JobRun, error) {
 	}
 
 	run.DryRun = dryRunInt != 0
-	if t, err := time.Parse(time.RFC3339Nano, startedStr); err == nil {
+	if t, err := parseSQLiteTime(startedStr); err == nil {
 		run.StartedAt = t
 	}
 	if finishedStr.Valid && finishedStr.String != "" {
-		if t, err := time.Parse(time.RFC3339Nano, finishedStr.String); err == nil {
+		if t, err := parseSQLiteTime(finishedStr.String); err == nil {
 			run.FinishedAt = &t
 		}
 	}

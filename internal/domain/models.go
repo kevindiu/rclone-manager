@@ -14,6 +14,8 @@ type GlobalSettings struct {
 	LogRetentionDays  int    `json:"log_retention_days" yaml:"log_retention_days"`
 	Timezone          string `json:"timezone" yaml:"timezone"`
 	MaxConcurrentJobs int    `json:"max_concurrent_jobs" yaml:"max_concurrent_jobs"`
+	WebhookURL        string `json:"webhook_url,omitempty" yaml:"webhook_url,omitempty"`
+	WebhookOn         string `json:"webhook_on,omitempty" yaml:"webhook_on,omitempty"` // "failure" | "always" | "off"
 }
 
 // Job represents a configurable backup/sync job.

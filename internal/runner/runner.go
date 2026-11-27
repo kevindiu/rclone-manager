@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/domain"
+	"github.com/kevindiu/rclone-manager/internal/notify"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
 )
 
@@ -37,6 +38,7 @@ type Runner struct {
 	store    RunStore
 	client   RcloneOps
 	hub      Broadcaster
+	notifier RunNotifier
 	logger   *slog.Logger
 	logDir   string
 	defaults domain.GlobalSettings
@@ -67,6 +69,13 @@ func NewRunner(store RunStore, client RcloneOps, hub Broadcaster, logDir string,
 		gate:     newConcurrencyGate(maxConcurrent),
 		active:   make(map[string]*activeRun),
 	}
+}
+
+// SetNotifier configures an optional external notifier for finished runs.
+func (r *Runner) SetNotifier(n RunNotifier) {
+	r.mu.Lock()
+	r.notifier = n
+	r.mu.Unlock()
 }
 
 // UpdateMaxConcurrent updates the concurrency limit dynamically.
@@ -429,6 +438,26 @@ func (r *Runner) finishRun(run *domain.JobRun, status, errMsg string) {
 		r.logger.Error("failed to finalize run record", "run_id", run.ID, "status", status, "error", err)
 	}
 	r.hub.Broadcast("run_completed", *run)
+
+	r.mu.RLock()
+	notifier := r.notifier
+	r.mu.RUnlock()
+	if notifier != nil {
+		settings, err := r.store.GetSettings(context.Background(), r.defaults)
+		if err != nil {
+			settings = r.defaults
+		}
+		if settings.WebhookURL != "" && notify.ShouldNotify(settings.WebhookOn, status) {
+			runCopy := *run
+			r.wg.Add(1)
+			go func() {
+				defer r.wg.Done()
+				nCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				notifier.NotifyRun(nCtx, settings, runCopy)
+			}()
+		}
+	}
 }
 
 func extractErrorMsg(line string) string {

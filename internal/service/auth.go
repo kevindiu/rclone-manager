@@ -51,6 +51,7 @@ type AuthStore interface {
 	CreateInitialUser(ctx context.Context, username, passwordHash string) (*domain.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*domain.User, error)
 	GetUserByID(ctx context.Context, id string) (*domain.User, error)
+	GetFirstUser(ctx context.Context) (*domain.User, error)
 	UpdateUserPassword(ctx context.Context, userID, passwordHash string) error
 	CreateSession(ctx context.Context, session domain.Session) error
 	GetSessionWithUser(ctx context.Context, tokenHash string) (*domain.Session, *domain.User, error)
@@ -299,6 +300,42 @@ func (a *AuthService) ChangePassword(ctx context.Context, userID, currentTokenHa
 // PruneExpiredSessions removes expired sessions from persistence.
 func (a *AuthService) PruneExpiredSessions(ctx context.Context) (int64, error) {
 	return a.store.PruneExpiredSessions(ctx)
+}
+
+// ResetPassword resets an administrator password (defaulting to the earliest user
+// when username is empty) and revokes all active sessions for that user.
+func (a *AuthService) ResetPassword(ctx context.Context, username, newPassword string) (*domain.User, error) {
+	if err := validatePassword(newPassword); err != nil {
+		return nil, err
+	}
+
+	var (
+		user *domain.User
+		err  error
+	)
+	cleanUser := strings.TrimSpace(username)
+	if cleanUser != "" {
+		user, err = a.store.GetUserByUsername(ctx, cleanUser)
+	} else {
+		user, err = a.store.GetFirstUser(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	newHash, err := auth.HashPasswordWithIterations(newPassword, a.pbkdf2Iterations)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.store.UpdateUserPassword(ctx, user.ID, newHash); err != nil {
+		return nil, err
+	}
+	if err := a.store.DeleteUserSessionsExcept(ctx, user.ID, ""); err != nil {
+		a.logger.Warn("failed to revoke user sessions after CLI password reset", "user_id", user.ID, "error", err)
+	}
+	user.PasswordHash = ""
+	a.logger.Info("administrator password reset via CLI", "username", user.Username)
+	return user, nil
 }
 
 func (a *AuthService) createSessionForUser(ctx context.Context, user domain.User) (*AuthSessionResult, error) {

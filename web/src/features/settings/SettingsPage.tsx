@@ -1,4 +1,4 @@
-import { Download, KeyRound, Loader2, Save, Server, Upload } from 'lucide-react';
+import { Bell, Download, KeyRound, Loader2, Save, Send, Server, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import type { AuthUser, GlobalSettings, SystemInfo } from '../../types/api';
@@ -19,6 +19,7 @@ export function SettingsPage({
 }) {
   const [form, setForm] = useState<GlobalSettings>(settings);
   const [saving, setSaving] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
 
@@ -42,6 +43,18 @@ export function SettingsPage({
       onToast(err instanceof Error ? err.message : 'Failed to save settings', true);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setTestingWebhook(true);
+    try {
+      await api.testWebhook(form.webhook_url ?? '');
+      onToast('Test webhook notification sent');
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Webhook test failed', true);
+    } finally {
+      setTestingWebhook(false);
     }
   };
 
@@ -239,6 +252,74 @@ export function SettingsPage({
             placeholder='e.g. "10M" or "08:00,5M 23:00,off" (blank = unlimited)'
             className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
           />
+        </div>
+
+        <div className="pt-4 border-t border-slate-800 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-sky-400" />
+              Notifications (Webhook)
+            </h3>
+            <p className="text-xs text-slate-400">
+              Send JSON alerts to Discord, Slack, Ntfy, or any generic HTTP webhook endpoint.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <div className="sm:col-span-2">
+              <label
+                htmlFor="settings-webhook-url"
+                className="block text-xs font-medium text-slate-300 mb-1"
+              >
+                Webhook URL
+              </label>
+              <input
+                id="settings-webhook-url"
+                type="url"
+                value={form.webhook_url ?? ''}
+                onChange={(e) => setForm({ ...form, webhook_url: e.target.value })}
+                placeholder="https://discord.com/api/webhooks/..."
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="settings-webhook-on"
+                className="block text-xs font-medium text-slate-300 mb-1"
+              >
+                Notify On
+              </label>
+              <select
+                id="settings-webhook-on"
+                value={form.webhook_on || 'failure'}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    webhook_on: e.target.value as 'failure' | 'always' | 'off',
+                  })
+                }
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+              >
+                <option value="failure">On failure only</option>
+                <option value="always">Always (all runs)</option>
+                <option value="off">Disabled</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <button
+              type="button"
+              disabled={testingWebhook || !(form.webhook_url ?? '').trim()}
+              onClick={() => void handleTestWebhook()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
+            >
+              {testingWebhook ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5 text-sky-400" />
+              )}
+              Send Test
+            </button>
+          </div>
         </div>
 
         <div className="flex justify-end">

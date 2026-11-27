@@ -66,6 +66,20 @@ func (m *mockAuthStore) GetUserByID(_ context.Context, id string) (*domain.User,
 	return &copyUser, nil
 }
 
+func (m *mockAuthStore) GetFirstUser(_ context.Context) (*domain.User, error) {
+	var first *domain.User
+	for _, u := range m.users {
+		uCopy := u
+		if first == nil || uCopy.CreatedAt.Before(first.CreatedAt) || (uCopy.CreatedAt.Equal(first.CreatedAt) && uCopy.ID < first.ID) {
+			first = &uCopy
+		}
+	}
+	if first == nil {
+		return nil, db.ErrNotFound
+	}
+	return first, nil
+}
+
 func (m *mockAuthStore) UpdateUserPassword(_ context.Context, userID, passwordHash string) error {
 	u, ok := m.users[userID]
 	if !ok {
@@ -260,5 +274,41 @@ func TestAuthServiceLoginRateLimitExpirationAndChangePassword(t *testing.T) {
 	}
 	if _, ok := st.sessions[expiredHash]; ok {
 		t.Fatal("expected expired session to be deleted on Authenticate")
+	}
+}
+
+func TestAuthServiceResetPassword(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newTestAuthService()
+
+	if _, err := svc.ResetPassword(ctx, "", "NewStrongPass123!"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on empty user table, got %v", err)
+	}
+
+	res, err := svc.SetupInitialAdmin(ctx, "admin", "InitialPass123!")
+	if err != nil {
+		t.Fatalf("SetupInitialAdmin: %v", err)
+	}
+
+	if _, err := svc.ResetPassword(ctx, "", "short"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation for short password, got %v", err)
+	}
+	if _, err := svc.ResetPassword(ctx, "nonexistent", "NewStrongPass123!"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing username, got %v", err)
+	}
+
+	// Default empty username targets the first user and revokes existing sessions.
+	updated, err := svc.ResetPassword(ctx, "", "RecoveredPass123!")
+	if err != nil {
+		t.Fatalf("ResetPassword default user: %v", err)
+	}
+	if updated.Username != "admin" {
+		t.Fatalf("expected username admin, got %q", updated.Username)
+	}
+	if _, _, err := svc.Authenticate(ctx, res.RawToken); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected prior session revoked after ResetPassword, got %v", err)
+	}
+	if _, err := svc.Login(ctx, "127.0.0.1", "admin", "RecoveredPass123!"); err != nil {
+		t.Fatalf("Login with reset password failed: %v", err)
 	}
 }

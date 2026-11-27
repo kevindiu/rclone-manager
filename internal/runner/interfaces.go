@@ -27,3 +27,8 @@ type RcloneOps interface {
 type Broadcaster interface {
 	Broadcast(eventType string, data any)
 }
+
+// RunNotifier sends asynchronous external notifications when job runs finish.
+type RunNotifier interface {
+	NotifyRun(ctx context.Context, settings domain.GlobalSettings, run domain.JobRun)
+}

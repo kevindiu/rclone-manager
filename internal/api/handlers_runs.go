@@ -17,10 +17,11 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	jobID := q.Get("job_id")
 	status := q.Get("status")
+	trigger := q.Get("trigger")
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
-	runs, total, err := s.svc.ListRuns(r.Context(), jobID, status, limit, offset)
+	runs, total, err := s.svc.ListRuns(r.Context(), jobID, status, trigger, limit, offset)
 	if err != nil {
 		s.writeInternalError(w, r, "list runs failed", err)
 		return

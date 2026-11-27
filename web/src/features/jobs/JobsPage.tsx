@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { GlobalSettings, Job, JobWithStatus, RemoteInfo } from '../../types/api';
 import { formatDateTime, formatRelative } from '../../utils/format';
@@ -32,6 +33,8 @@ export function JobsPage({
 }) {
   const [query, setQuery] = useState('');
   const [editingJob, setEditingJob] = useState<Job | null | undefined>(undefined);
+  const [confirmDeleteJob, setConfirmDeleteJob] = useState<Job | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -216,11 +219,7 @@ export function JobsPage({
                   <button
                     type="button"
                     disabled={job.is_running}
-                    onClick={() => {
-                      if (window.confirm(`Delete job "${job.name}"?`)) {
-                        void handleAction(() => api.deleteJob(job.id), `Deleted "${job.name}"`);
-                      }
-                    }}
+                    onClick={() => setConfirmDeleteJob(job)}
                     className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 disabled:opacity-40"
                     title="Delete"
                   >
@@ -264,6 +263,25 @@ export function JobsPage({
             onReload();
           }}
           onClose={() => setEditingJob(undefined)}
+        />
+      )}
+
+      {confirmDeleteJob && (
+        <ConfirmModal
+          title="Delete Backup Job"
+          message={`Delete job "${confirmDeleteJob.name}"? Historical run logs will remain until pruned.`}
+          busy={deleting}
+          onCancel={() => setConfirmDeleteJob(null)}
+          onConfirm={() => {
+            const target = confirmDeleteJob;
+            setDeleting(true);
+            void handleAction(() => api.deleteJob(target.id), `Deleted "${target.name}"`).finally(
+              () => {
+                setDeleting(false);
+                setConfirmDeleteJob(null);
+              }
+            );
+          }}
         />
       )}
     </div>

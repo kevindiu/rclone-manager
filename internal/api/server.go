@@ -96,6 +96,7 @@ func (s *Server) registerRoutes() {
 	// Settings & portable config backup
 	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
+	s.mux.HandleFunc("POST /api/settings/test-webhook", s.handleTestWebhook)
 	s.mux.HandleFunc("GET /api/config/export", s.handleExportConfig)
 	s.mux.HandleFunc("POST /api/config/import", s.handleImportConfig)
 

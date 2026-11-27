@@ -43,6 +43,8 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   log_retention_days: 30,
   timezone: 'UTC',
   max_concurrent_jobs: 2,
+  webhook_url: '',
+  webhook_on: 'failure',
 };
 
 export function App() {

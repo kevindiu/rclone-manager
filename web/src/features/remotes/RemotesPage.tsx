@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/client';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import type { ProviderInfo, RemoteAbout, RemoteInfo, RemoteTestResult } from '../../types/api';
 import { formatBytes } from '../../utils/format';
 import { ImportConfModal } from './ImportConfModal';
@@ -36,6 +37,8 @@ export function RemotesPage({
   const [testResults, setTestResults] = useState<Record<string, RemoteTestResult>>({});
   const [aboutResults, setAboutResults] = useState<Record<string, RemoteAbout>>({});
   const [loadingAbout, setLoadingAbout] = useState<Record<string, boolean>>({});
+  const [confirmDeleteRemote, setConfirmDeleteRemote] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const runTest = async (name: string) => {
     setTesting((p) => ({ ...p, [name]: true }));
@@ -70,13 +73,16 @@ export function RemotesPage({
   };
 
   const handleDelete = async (name: string) => {
-    if (!window.confirm(`Delete remote "${name}" from rclone.conf?`)) return;
+    setDeleting(true);
     try {
       await api.deleteRemote(name);
       onToast(`Deleted remote "${name}"`);
+      setConfirmDeleteRemote(null);
       onReload();
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Delete failed', true);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -161,7 +167,7 @@ export function RemotesPage({
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleDelete(rem.name)}
+                        onClick={() => setConfirmDeleteRemote(rem.name)}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300"
                         title="Delete remote"
                       >
@@ -293,6 +299,16 @@ export function RemotesPage({
             onReload();
           }}
           onClose={() => setShowImport(false)}
+        />
+      )}
+
+      {confirmDeleteRemote && (
+        <ConfirmModal
+          title="Delete Remote"
+          message={`Delete remote "${confirmDeleteRemote}" from rclone.conf? Remotes still referenced by backup jobs cannot be deleted.`}
+          busy={deleting}
+          onCancel={() => setConfirmDeleteRemote(null)}
+          onConfirm={() => void handleDelete(confirmDeleteRemote)}
         />
       )}
     </div>

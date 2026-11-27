@@ -22,7 +22,10 @@ func formatSQLiteTime(t time.Time) string {
 }
 
 func parseSQLiteTime(raw string) (time.Time, error) {
-	return time.Parse(sqliteTimeFormat, raw)
+	if t, err := time.Parse(sqliteTimeFormat, raw); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339Nano, raw)
 }
 
 // CountUsers returns the total number of persisted user accounts.
@@ -107,6 +110,25 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (*domain.User, error
 		ctx,
 		`SELECT id, username, password_hash, created_at, updated_at FROM users WHERE id = ?`,
 		id,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &createdStr, &updatedStr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	user.CreatedAt, _ = parseSQLiteTime(createdStr)
+	user.UpdatedAt, _ = parseSQLiteTime(updatedStr)
+	return &user, nil
+}
+
+// GetFirstUser returns the earliest created user account.
+func (s *Store) GetFirstUser(ctx context.Context) (*domain.User, error) {
+	var user domain.User
+	var createdStr, updatedStr string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT id, username, password_hash, created_at, updated_at FROM users ORDER BY created_at ASC LIMIT 1`,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &createdStr, &updatedStr)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/domain"
@@ -43,6 +44,11 @@ func (s *Store) SaveSettings(ctx context.Context, settings domain.GlobalSettings
 	if settings.LogRetentionDays < 0 {
 		settings.LogRetentionDays = 0
 	}
+	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)
+	settings.WebhookOn = strings.ToLower(strings.TrimSpace(settings.WebhookOn))
+	if settings.WebhookOn == "" {
+		settings.WebhookOn = "failure"
+	}
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return err
@@ -73,5 +79,10 @@ func normalizeSettings(s *domain.GlobalSettings, defaults domain.GlobalSettings)
 	}
 	if s.ConTimeout == "" {
 		s.ConTimeout = defaults.ConTimeout
+	}
+	s.WebhookURL = strings.TrimSpace(s.WebhookURL)
+	s.WebhookOn = strings.ToLower(strings.TrimSpace(s.WebhookOn))
+	if s.WebhookOn == "" {
+		s.WebhookOn = "failure"
 	}
 }

@@ -41,6 +41,24 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WebhookURL string `json:"webhook_url"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
+	}
+	if err := s.svc.TestWebhook(r.Context(), body.WebhookURL); errors.Is(err, service.ErrValidation) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	} else if err != nil {
+		writeError(w, http.StatusBadGateway, "webhook test failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
 func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	if format == "" {

@@ -81,7 +81,7 @@ func (m *mockStore) ImportBundle(_ context.Context, bundle domain.ExportBundle, 
 	}
 	return nil
 }
-func (m *mockStore) ListRuns(_ context.Context, _, _ string, _, _ int) ([]domain.JobRun, int, error) {
+func (m *mockStore) ListRuns(_ context.Context, _, _, _ string, _, _ int) ([]domain.JobRun, int, error) {
 	return nil, 0, nil
 }
 func (m *mockStore) GetRun(_ context.Context, id string) (*domain.JobRun, error) {
@@ -198,6 +198,28 @@ func TestUpdateSettingsAndImportBundleValidation(t *testing.T) {
 	}
 	if err := svc.ImportBundle(ctx, badBundle, "merge"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected ErrValidation for invalid bundle timezone, got %v", err)
+	}
+
+	// Webhook settings validation & TestWebhook
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookURL: "ftp://bad.example.com"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation for non-http webhook URL, got %v", err)
+	}
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookURL: "https://hooks.example.com/1", WebhookOn: "bogus"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation for invalid webhook_on, got %v", err)
+	}
+	if err := svc.TestWebhook(ctx, ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation when testing empty webhook URL, got %v", err)
+	}
+	var testedURL string
+	svc.webhookTestSender = func(_ context.Context, webhookURL string) error {
+		testedURL = webhookURL
+		return nil
+	}
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookURL: "https://hooks.example.com/1", WebhookOn: "always"}); err != nil {
+		t.Fatalf("UpdateSettings valid webhook failed: %v", err)
+	}
+	if err := svc.TestWebhook(ctx, ""); err != nil || testedURL != "https://hooks.example.com/1" {
+		t.Fatalf("TestWebhook fallback to saved settings failed: err=%v testedURL=%q", err, testedURL)
 	}
 }
 

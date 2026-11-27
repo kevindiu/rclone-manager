@@ -1,6 +1,7 @@
 import { Loader2, RefreshCw, Terminal, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { JobRun, JobWithStatus } from '../../types/api';
 import { formatBytes, formatDateTime, formatDurationMs } from '../../utils/format';
@@ -20,8 +21,11 @@ export function HistoryPage({
   const [total, setTotal] = useState(0);
   const [jobFilter, setJobFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [triggerFilter, setTriggerFilter] = useState('');
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [confirmDeleteRun, setConfirmDeleteRun] = useState<JobRun | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const limit = 25;
 
   const loadRuns = useCallback(async () => {
@@ -30,6 +34,7 @@ export function HistoryPage({
       const res = await api.listRuns({
         job_id: jobFilter || undefined,
         status: statusFilter || undefined,
+        trigger: triggerFilter || undefined,
         limit,
         offset,
       });
@@ -40,7 +45,7 @@ export function HistoryPage({
     } finally {
       setLoading(false);
     }
-  }, [jobFilter, statusFilter, offset, onToast]);
+  }, [jobFilter, statusFilter, triggerFilter, offset, onToast]);
 
   useEffect(() => {
     void refreshSignal;
@@ -48,12 +53,16 @@ export function HistoryPage({
   }, [loadRuns, refreshSignal]);
 
   const handleDelete = async (run: JobRun) => {
+    setDeleting(true);
     try {
       await api.deleteRun(run.id);
       onToast('Run record deleted');
+      setConfirmDeleteRun(null);
       void loadRuns();
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Delete failed', true);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -91,6 +100,22 @@ export function HistoryPage({
             <option value="running">Running</option>
             <option value="cancelled">Cancelled</option>
             <option value="skipped">Skipped</option>
+          </select>
+
+          <select
+            value={triggerFilter}
+            onChange={(e) => {
+              setTriggerFilter(e.target.value);
+              setOffset(0);
+            }}
+            className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs sm:text-sm text-slate-100"
+          >
+            <option value="">All Triggers</option>
+            <option value="schedule">Schedule</option>
+            <option value="manual">Manual</option>
+            <option value="restore">Restore</option>
+            <option value="restore_dry_run">Restore (Dry Run)</option>
+            <option value="dry_run">Dry Run</option>
           </select>
         </div>
 
@@ -150,7 +175,7 @@ export function HistoryPage({
                 {run.status !== 'running' && run.status !== 'queued' && (
                   <button
                     type="button"
-                    onClick={() => void handleDelete(run)}
+                    onClick={() => setConfirmDeleteRun(run)}
                     className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300"
                     title="Delete run"
                   >
@@ -187,6 +212,16 @@ export function HistoryPage({
             </button>
           </div>
         </div>
+      )}
+
+      {confirmDeleteRun && (
+        <ConfirmModal
+          title="Delete Run Record"
+          message={`Delete history record and log file for "${confirmDeleteRun.job_name}" (${formatDateTime(confirmDeleteRun.started_at)})?`}
+          busy={deleting}
+          onCancel={() => setConfirmDeleteRun(null)}
+          onConfirm={() => void handleDelete(confirmDeleteRun)}
+        />
       )}
     </div>
   );

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	"github.com/kevindiu/rclone-manager/internal/config"
 	"github.com/kevindiu/rclone-manager/internal/db"
 	"github.com/kevindiu/rclone-manager/internal/events"
+	"github.com/kevindiu/rclone-manager/internal/notify"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
 	"github.com/kevindiu/rclone-manager/internal/runner"
 	"github.com/kevindiu/rclone-manager/internal/scheduler"
@@ -41,6 +46,14 @@ func newLogger(levelStr, formatStr string) *slog.Logger {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		if err := runResetPasswordCLI(os.Args[2:]); err != nil {
+			slog.Error("reset-password failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("load config failed", "error", err)
@@ -88,6 +101,7 @@ func main() {
 
 	hub := events.NewHub()
 	runEngine := runner.NewRunner(store, client, hub, cfg.LogDir, cfg.Defaults, logger)
+	runEngine.SetNotifier(notify.NewNotifier(logger))
 	sched := scheduler.New(store, runEngine, cfg.Defaults, logger)
 	if err := sched.Start(); err != nil {
 		logger.Error("start scheduler failed", "error", err)
@@ -133,6 +147,7 @@ func main() {
 
 	sched.Stop()
 	runEngine.Shutdown()
+	hub.Close()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -140,4 +155,53 @@ func main() {
 		logger.Warn("http shutdown warning", "error", err)
 	}
 	logger.Info("shutdown complete")
+}
+
+func runResetPasswordCLI(args []string) error {
+	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
+	username := fs.String("user", "", "Username to reset (defaults to earliest admin user)")
+	passwordFlag := fs.String("password", "", "New password (min 8 characters)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	logger := newLogger(cfg.LogLevel, cfg.LogFormat)
+	slog.SetDefault(logger)
+
+	store, err := db.Open(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("open database %s: %w", cfg.DBPath, err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			logger.Warn("close database warning", "error", closeErr)
+		}
+	}()
+
+	password := *passwordFlag
+	if password == "" {
+		password = os.Getenv("RCLONE_MANAGER_RESET_PASSWORD")
+	}
+	if password == "" {
+		if info, statErr := os.Stdin.Stat(); statErr == nil && (info.Mode()&os.ModeCharDevice) != 0 {
+			fmt.Fprint(os.Stderr, "New password (min 8 chars): ")
+		}
+		line, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
+		if readErr != nil && len(line) == 0 {
+			return fmt.Errorf("read password from stdin: %w", readErr)
+		}
+		password = strings.TrimRight(line, "\r\n")
+	}
+
+	authSvc := service.NewAuthService(store, cfg.SessionTTL, logger)
+	user, err := authSvc.ResetPassword(context.Background(), *username, password)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Password updated for user %q; all active sessions revoked.\n", user.Username)
+	return nil
 }

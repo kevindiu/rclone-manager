@@ -65,17 +65,10 @@ export function RestoreModal({
   };
 
   const handlePickedFolder = (pickedDir: string) => {
-    if (entry.IsDir) {
-      const clean = pickedDir.endsWith(':')
-        ? `${pickedDir}${entry.Name}`
-        : `${pickedDir.replace(/\/+$/, '')}/${entry.Name}`;
-      setTargetPath(clean);
-    } else {
-      const clean = pickedDir.endsWith(':')
-        ? `${pickedDir}${entry.Name}`
-        : `${pickedDir.replace(/\/+$/, '')}/${entry.Name}`;
-      setTargetPath(clean);
-    }
+    const clean = pickedDir.endsWith(':')
+      ? `${pickedDir}${entry.Name}`
+      : `${pickedDir.replace(/\/+$/, '')}/${entry.Name}`;
+    setTargetPath(clean);
   };
 
   return (

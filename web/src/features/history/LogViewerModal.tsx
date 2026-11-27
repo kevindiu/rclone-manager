@@ -1,11 +1,14 @@
-import { Download, Loader2, Search } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Download, Loader2, Radio, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { JobRun, ParsedLogLine } from '../../types/api';
 
+const isActiveStatus = (status: string) => status === 'running' || status === 'queued';
+
 export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => void }) {
+  const [currentRun, setCurrentRun] = useState<JobRun>(run);
   const [lines, setLines] = useState<ParsedLogLine[]>([]);
   const [raw, setRaw] = useState('');
   const [truncated, setTruncated] = useState(false);
@@ -14,10 +17,22 @@ export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => v
   const [query, setQuery] = useState('');
   const [hideStats, setHideStats] = useState(true);
   const [rawView, setRawView] = useState(false);
+  const [liveTail, setLiveTail] = useState(() => isActiveStatus(run.status));
+
+  const parsedScrollRef = useRef<HTMLDivElement | null>(null);
+  const rawScrollRef = useRef<HTMLPreElement | null>(null);
+  const stickToBottomRef = useRef(true);
+
+  useEffect(() => {
+    setCurrentRun(run);
+    setLiveTail(isActiveStatus(run.status));
+    stickToBottomRef.current = true;
+  }, [run]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError('');
     api
       .getRunLogs(run.id)
       .then((res) => {
@@ -37,6 +52,52 @@ export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => v
       cancelled = true;
     };
   }, [run.id]);
+
+  const active = isActiveStatus(currentRun.status);
+
+  useEffect(() => {
+    if (!liveTail || !active) return;
+    let cancelled = false;
+    let inFlight = false;
+
+    const timer = window.setInterval(() => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      void Promise.all([api.getRun(run.id), api.getRunLogs(run.id)])
+        .then(([latestRun, logRes]) => {
+          if (cancelled) return;
+          setCurrentRun(latestRun);
+          setLines(logRes.lines ?? []);
+          setRaw(logRes.raw ?? '');
+          setTruncated(Boolean(logRes.truncated));
+          setError('');
+          if (!isActiveStatus(latestRun.status)) {
+            setLiveTail(false);
+          } else if (stickToBottomRef.current) {
+            window.requestAnimationFrame(() => {
+              const el = rawView ? rawScrollRef.current : parsedScrollRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+            });
+          }
+        })
+        .catch(() => {
+          // ignore transient poll errors; next tick will retry
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [liveTail, active, run.id, rawView]);
+
+  const handleLogScroll = (el: HTMLElement | null) => {
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
 
   const filteredLines = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -69,14 +130,14 @@ export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => v
 
   return (
     <Modal
-      title={`Run Logs: ${run.job_name}`}
-      subtitle={`Run ID ${run.id}`}
+      title={`Run Logs: ${currentRun.job_name}`}
+      subtitle={`Run ID ${currentRun.id}`}
       onClose={onClose}
       maxWidth="max-w-4xl"
       footer={
         <>
           <a
-            href={`/api/runs/${encodeURIComponent(run.id)}/logs?download=1`}
+            href={`/api/runs/${encodeURIComponent(currentRun.id)}/logs?download=1`}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
           >
             <Download className="w-3.5 h-3.5" />
@@ -94,8 +155,24 @@ export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => v
     >
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <StatusBadge status={run.status} dryRun={run.dry_run} />
+          <StatusBadge status={currentRun.status} dryRun={currentRun.dry_run} />
           <div className="flex flex-wrap items-center gap-2">
+            {active && (
+              <button
+                type="button"
+                onClick={() => setLiveTail((v) => !v)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                  liveTail
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <Radio
+                  className={`w-3.5 h-3.5 ${liveTail ? 'animate-pulse text-emerald-400' : ''}`}
+                />
+                {liveTail ? 'Live' : 'Paused'}
+              </button>
+            )}
             <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
               <input
                 type="checkbox"
@@ -115,15 +192,15 @@ export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => v
           </div>
         </div>
 
-        {run.command_preview && (
+        {currentRun.command_preview && (
           <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 break-all">
-            $ {run.command_preview}
+            $ {currentRun.command_preview}
           </div>
         )}
 
-        {run.pruned_versions && run.pruned_versions.length > 0 && (
+        {currentRun.pruned_versions && currentRun.pruned_versions.length > 0 && (
           <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-300">
-            Pruned expired version folders: {run.pruned_versions.join(', ')}
+            Pruned expired version folders: {currentRun.pruned_versions.join(', ')}
           </div>
         )}
 
@@ -155,11 +232,19 @@ export function LogViewerModal({ run, onClose }: { run: JobRun; onClose: () => v
             {error}
           </div>
         ) : rawView ? (
-          <pre className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-[48vh] whitespace-pre-wrap">
+          <pre
+            ref={rawScrollRef}
+            onScroll={(e) => handleLogScroll(e.currentTarget)}
+            className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-[48vh] whitespace-pre-wrap"
+          >
             {raw || '(empty log)'}
           </pre>
         ) : (
-          <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 max-h-[48vh] overflow-y-auto font-mono text-[11px] space-y-1">
+          <div
+            ref={parsedScrollRef}
+            onScroll={(e) => handleLogScroll(e.currentTarget)}
+            className="rounded-xl bg-slate-950 border border-slate-800 p-3 max-h-[48vh] overflow-y-auto font-mono text-[11px] space-y-1"
+          >
             {filteredLines.length === 0 ? (
               <div className="text-slate-500 py-4 text-center">No matching log lines.</div>
             ) : (

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/domain"
+	"github.com/kevindiu/rclone-manager/internal/notify"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
 )
 
@@ -28,7 +29,7 @@ type Store interface {
 	UpdateJob(ctx context.Context, id string, job domain.Job) (*domain.Job, error)
 	DeleteJob(ctx context.Context, id string) error
 	ImportBundle(ctx context.Context, bundle domain.ExportBundle, mode string, defaults domain.GlobalSettings) error
-	ListRuns(ctx context.Context, jobID, status string, limit, offset int) ([]domain.JobRun, int, error)
+	ListRuns(ctx context.Context, jobID, status, trigger string, limit, offset int) ([]domain.JobRun, int, error)
 	GetRun(ctx context.Context, id string) (*domain.JobRun, error)
 	GetLastRunsByJobIDs(ctx context.Context) (map[string]domain.JobRun, error)
 	DeleteRun(ctx context.Context, id string) error
@@ -88,13 +89,14 @@ type JobWithStatus struct {
 
 // AppService orchestrates settings, jobs, runs, scheduling, remotes, and event broadcasting.
 type AppService struct {
-	store     Store
-	runner    JobRunner
-	scheduler ScheduleReloader
-	hub       Broadcaster
-	browser   RcloneBrowser
-	logger    *slog.Logger
-	defaults  domain.GlobalSettings
+	store             Store
+	runner            JobRunner
+	scheduler         ScheduleReloader
+	hub               Broadcaster
+	browser           RcloneBrowser
+	logger            *slog.Logger
+	defaults          domain.GlobalSettings
+	webhookTestSender func(ctx context.Context, webhookURL string) error
 }
 
 // New creates a new AppService.
@@ -111,13 +113,14 @@ func New(
 		logger = slog.Default()
 	}
 	return &AppService{
-		store:     store,
-		runner:    runner,
-		scheduler: sched,
-		hub:       hub,
-		browser:   browser,
-		logger:    logger,
-		defaults:  defaults,
+		store:             store,
+		runner:            runner,
+		scheduler:         sched,
+		hub:               hub,
+		browser:           browser,
+		logger:            logger,
+		defaults:          defaults,
+		webhookTestSender: notify.NewNotifier(logger).SendTest,
 	}
 }
 
@@ -132,12 +135,28 @@ func (s *AppService) GetSettings(ctx context.Context) (domain.GlobalSettings, er
 	return s.store.GetSettings(ctx, s.defaults)
 }
 
+func validateSettingsFields(settings *domain.GlobalSettings) error {
+	if settings.Timezone != "" {
+		if _, err := time.LoadLocation(settings.Timezone); err != nil {
+			return fmt.Errorf("%w: invalid timezone: %s", ErrValidation, settings.Timezone)
+		}
+	}
+	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)
+	if err := notify.ValidateWebhookURL(settings.WebhookURL); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	normalizedOn, err := notify.NormalizeWebhookOn(settings.WebhookOn)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	settings.WebhookOn = normalizedOn
+	return nil
+}
+
 // UpdateSettings validates, saves, and applies global settings.
 func (s *AppService) UpdateSettings(ctx context.Context, incoming domain.GlobalSettings) (domain.GlobalSettings, error) {
-	if incoming.Timezone != "" {
-		if _, err := time.LoadLocation(incoming.Timezone); err != nil {
-			return domain.GlobalSettings{}, fmt.Errorf("%w: invalid timezone: %s", ErrValidation, incoming.Timezone)
-		}
+	if err := validateSettingsFields(&incoming); err != nil {
+		return domain.GlobalSettings{}, err
 	}
 	if incoming.MaxConcurrentJobs < 1 {
 		incoming.MaxConcurrentJobs = 1
@@ -154,6 +173,26 @@ func (s *AppService) UpdateSettings(ctx context.Context, incoming domain.GlobalS
 		return incoming, nil
 	}
 	return updated, nil
+}
+
+// TestWebhook delivers a verification webhook notification using the supplied URL
+// or, when omitted, the currently saved webhook URL.
+func (s *AppService) TestWebhook(ctx context.Context, webhookURL string) error {
+	target := strings.TrimSpace(webhookURL)
+	if target == "" {
+		settings, err := s.store.GetSettings(ctx, s.defaults)
+		if err != nil {
+			return err
+		}
+		target = strings.TrimSpace(settings.WebhookURL)
+	}
+	if target == "" {
+		return fmt.Errorf("%w: webhook URL is required", ErrValidation)
+	}
+	if err := notify.ValidateWebhookURL(target); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	return s.webhookTestSender(ctx, target)
 }
 
 // ExportBundle exports settings and all jobs into a portable bundle.
@@ -179,10 +218,8 @@ func (s *AppService) ImportBundle(ctx context.Context, bundle domain.ExportBundl
 	if mode != "merge" && mode != "replace" {
 		return fmt.Errorf("%w: mode must be merge or replace", ErrValidation)
 	}
-	if bundle.Settings.Timezone != "" {
-		if _, err := time.LoadLocation(bundle.Settings.Timezone); err != nil {
-			return fmt.Errorf("%w: invalid timezone: %s", ErrValidation, bundle.Settings.Timezone)
-		}
+	if err := validateSettingsFields(&bundle.Settings); err != nil {
+		return err
 	}
 	for i := range bundle.Jobs {
 		if err := ValidateJob(&bundle.Jobs[i]); err != nil {

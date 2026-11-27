@@ -253,12 +253,75 @@ func TestRunsLifecycleRecoveryAndPruning(t *testing.T) {
 		t.Fatalf("expected recent log file to remain, stat err=%v", err)
 	}
 
-	runs, total, err := store.ListRuns(ctx, "job-1", "", 10, 0)
+	runs, total, err := store.ListRuns(ctx, "job-1", "", "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 1 || len(runs) != 1 || runs[0].ID != "run-running" {
 		t.Fatalf("unexpected remaining runs: total=%d runs=%+v", total, runs)
+	}
+}
+
+func TestRunsSubsecondOrderingAndTriggerFilter(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	run0 := domain.JobRun{
+		ID:        "run-000",
+		JobID:     "job-sub",
+		JobName:   "Subsecond Job",
+		Trigger:   "schedule",
+		Status:    "success",
+		StartedAt: base,
+	}
+	run1 := domain.JobRun{
+		ID:        "run-100",
+		JobID:     "job-sub",
+		JobName:   "Subsecond Job",
+		Trigger:   "manual",
+		Status:    "success",
+		StartedAt: base.Add(100 * time.Millisecond),
+	}
+	run9 := domain.JobRun{
+		ID:        "run-900",
+		JobID:     "job-sub",
+		JobName:   "Subsecond Job",
+		Trigger:   "restore",
+		Status:    "success",
+		StartedAt: base.Add(900 * time.Millisecond),
+	}
+	for _, r := range []domain.JobRun{run0, run1, run9} {
+		if err := store.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun %s: %v", r.ID, err)
+		}
+	}
+
+	runs, total, err := store.ListRuns(ctx, "job-sub", "", "", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(runs) != 3 {
+		t.Fatalf("expected 3 runs, got total=%d len=%d", total, len(runs))
+	}
+	if runs[0].ID != "run-900" || runs[1].ID != "run-100" || runs[2].ID != "run-000" {
+		t.Fatalf("unexpected chronological DESC order: %s, %s, %s", runs[0].ID, runs[1].ID, runs[2].ID)
+	}
+
+	lastMap, err := store.GetLastRunsByJobIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastMap["job-sub"].ID != "run-900" {
+		t.Fatalf("expected latest run-900 from GetLastRunsByJobIDs, got %s", lastMap["job-sub"].ID)
+	}
+
+	restoreRuns, restoreTotal, err := store.ListRuns(ctx, "", "", "restore", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoreTotal != 1 || len(restoreRuns) != 1 || restoreRuns[0].ID != "run-900" {
+		t.Fatalf("expected 1 restore-triggered run, got total=%d runs=%+v", restoreTotal, restoreRuns)
 	}
 }
 

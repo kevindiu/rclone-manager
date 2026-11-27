@@ -85,6 +85,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
+  testWebhook: (webhook_url: string) =>
+    request<{ status: string }>('/api/settings/test-webhook', {
+      method: 'POST',
+      body: JSON.stringify({ webhook_url }),
+    }),
   importConfig: (content: string, mode: 'merge' | 'replace', contentType = 'application/json') =>
     request<{ status: string; mode: string; jobs_imported: number }>(
       `/api/config/import?mode=${encodeURIComponent(mode)}`,
@@ -165,15 +170,23 @@ export const api = {
 
   // Runs & Logs
   listRuns: (
-    params: { job_id?: string; status?: string; limit?: number; offset?: number } = {}
+    params: {
+      job_id?: string;
+      status?: string;
+      trigger?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
   ) => {
     const q = new URLSearchParams();
     if (params.job_id) q.set('job_id', params.job_id);
     if (params.status) q.set('status', params.status);
+    if (params.trigger) q.set('trigger', params.trigger);
     if (params.limit) q.set('limit', String(params.limit));
     if (params.offset) q.set('offset', String(params.offset));
     return request<{ runs: JobRun[]; total: number }>(`/api/runs?${q.toString()}`);
   },
+  getRun: (id: string) => request<JobRun>(`/api/runs/${encodeURIComponent(id)}`),
   getRunLogs: (id: string) =>
     request<{
       run_id: string;

@@ -252,7 +252,7 @@ func TestRunnerDryRunAndOverlapProtection(t *testing.T) {
 	delete(r.active, job.ID)
 	r.mu.Unlock()
 
-	runs, _, err := store.ListRuns(ctx, job.ID, "skipped", 10, 0)
+	runs, _, err := store.ListRuns(ctx, job.ID, "skipped", "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
