@@ -197,8 +197,18 @@ func (n *Notifier) doRequest(ctx context.Context, webhookURL, contentType string
 	resp, err := n.client.Do(req)
 	if err != nil {
 		var uErr *url.Error
-		if errors.As(err, &uErr) && uErr.Err != nil {
-			return fmt.Errorf("webhook request failed: %v", uErr.Err)
+		if errors.As(err, &uErr) {
+			inner := error(uErr)
+			for {
+				var next *url.Error
+				if !errors.As(inner, &next) || next.Err == nil {
+					break
+				}
+				inner = next.Err
+			}
+			if inner != error(uErr) {
+				return fmt.Errorf("webhook request failed: %v", inner)
+			}
 		}
 		return fmt.Errorf("webhook request failed")
 	}
