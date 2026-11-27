@@ -1,5 +1,5 @@
 import { Bell, Download, KeyRound, Loader2, Save, Send, Server, Upload } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import type { AuthUser, GlobalSettings, SystemInfo } from '../../types/api';
 import { COMMON_TIMEZONES } from '../../utils/format';
@@ -22,7 +22,6 @@ export function SettingsPage({
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
-  const configFileRef = useRef<HTMLInputElement | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -384,25 +383,25 @@ export function SettingsPage({
             </label>
           </div>
 
-          <input
-            ref={configFileRef}
-            type="file"
-            onChange={(e) => void handleImportFile(e)}
-            className="sr-only"
-          />
-          <button
-            type="button"
-            disabled={importing}
-            onClick={() => configFileRef.current?.click()}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 cursor-pointer disabled:opacity-50"
+          <div
+            className={`relative overflow-hidden inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 ${
+              importing ? 'opacity-50 pointer-events-none' : 'cursor-pointer'
+            }`}
           >
             {importing ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Upload className="w-3.5 h-3.5" />
             )}
-            Import JSON / YAML File
-          </button>
+            <span>Import JSON / YAML File</span>
+            <input
+              type="file"
+              aria-label="Import JSON or YAML configuration file"
+              disabled={importing}
+              onChange={(e) => void handleImportFile(e)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+          </div>
         </div>
       </div>
 

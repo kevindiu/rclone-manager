@@ -1,5 +1,5 @@
 import { Loader2, Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
 
@@ -16,7 +16,6 @@ export function ImportConfModal({
   const [importing, setImporting] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadConfigFile = async (file: File) => {
     setError('');
@@ -99,20 +98,16 @@ export function ImportConfModal({
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              onChange={(e) => void handleFile(e)}
-              className="sr-only"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 cursor-pointer"
-            >
+            <div className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 cursor-pointer">
               <Upload className="w-3.5 h-3.5 text-sky-400" />
-              Load rclone.conf file
-            </button>
+              <span>Load rclone.conf file</span>
+              <input
+                type="file"
+                aria-label="Load rclone.conf file"
+                onChange={(e) => void handleFile(e)}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
             {loadedFileName && (
               <span className="text-[11px] font-mono text-emerald-400 truncate max-w-[180px]">
                 {loadedFileName}
