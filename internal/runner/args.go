@@ -12,7 +12,7 @@ import (
 // BuildRcloneArgs constructs the complete argument list for an rclone job execution.
 func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath string, dryRun bool, nowLocal time.Time) (args []string, backupBase string, datedBackupDir string, err error) {
 	op := job.Operation
-	if op != "copy" && op != "sync" {
+	if op != "copy" && op != "sync" && op != "copyto" {
 		op = "sync"
 	}
 

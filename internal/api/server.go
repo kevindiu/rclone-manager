@@ -23,6 +23,7 @@ import (
 type Server struct {
 	cfg        *config.Config
 	svc        *service.AppService
+	auth       *service.AuthService
 	client     *rclone.Client
 	runner     *runner.Runner
 	hub        *events.Hub
@@ -37,6 +38,7 @@ type Server struct {
 func NewServer(
 	cfg *config.Config,
 	svc *service.AppService,
+	authSvc *service.AuthService,
 	client *rclone.Client,
 	r *runner.Runner,
 	hub *events.Hub,
@@ -50,6 +52,7 @@ func NewServer(
 	s := &Server{
 		cfg:        cfg,
 		svc:        svc,
+		auth:       authSvc,
 		client:     client,
 		runner:     r,
 		hub:        hub,
@@ -69,6 +72,13 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) registerRoutes() {
+	// Authentication (public status/setup/login/logout + protected password change)
+	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
+	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("POST /api/auth/change-password", s.handleAuthChangePassword)
+
 	// System
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/system/info", s.handleSystemInfo)
@@ -110,6 +120,7 @@ func (s *Server) registerRoutes() {
 	// File Browser & Restore
 	s.mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	s.mux.HandleFunc("GET /api/browse/download", s.handleBrowseDownload)
+	s.mux.HandleFunc("GET /api/browse/versions", s.handleBrowseVersions)
 	s.mux.HandleFunc("POST /api/browse/restore", s.handleBrowseRestore)
 
 	// SSE Live Progress
@@ -162,16 +173,38 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 		rec.Header().Set("Referrer-Policy", "no-referrer")
 
 		// Apply CORS only when explicitly configured via RCLONE_MANAGER_CORS_ORIGINS.
-		if origin := r.Header.Get("Origin"); origin != "" && s.isAllowedOrigin(origin) {
-			rec.Header().Set("Access-Control-Allow-Origin", origin)
-			rec.Header().Set("Vary", "Origin")
-			rec.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			rec.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if allowed, allowCreds := s.matchAllowedOrigin(origin); allowed {
+				rec.Header().Set("Access-Control-Allow-Origin", origin)
+				rec.Header().Set("Vary", "Origin")
+				rec.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				rec.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				if allowCreds {
+					rec.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
+			}
 		}
 
 		if r.Method == http.MethodOptions {
 			rec.WriteHeader(http.StatusNoContent)
 			return
+		}
+
+		// Mandatory session cookie enforcement for all protected /api/* routes.
+		if !isPublicPath(r.URL.Path) {
+			if s.auth == nil {
+				writeError(rec, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			user, tokenHash, err := s.auth.Authenticate(r.Context(), sessionTokenFromRequest(r))
+			if err != nil {
+				writeError(rec, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			r = r.WithContext(withAuthContext(r.Context(), authContext{
+				User:      *user,
+				TokenHash: tokenHash,
+			}))
 		}
 
 		next.ServeHTTP(rec, r)
@@ -187,13 +220,33 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) isAllowedOrigin(origin string) bool {
-	for _, allowed := range s.cfg.CORSOrigins {
-		if allowed == "*" || strings.EqualFold(allowed, origin) {
-			return true
+func (s *Server) matchAllowedOrigin(origin string) (allowed bool, allowCreds bool) {
+	for _, entry := range s.cfg.CORSOrigins {
+		if entry == "*" {
+			return true, false
+		}
+		if strings.EqualFold(entry, origin) {
+			return true, true
 		}
 	}
-	return false
+	return false, false
+}
+
+func isPublicPath(urlPath string) bool {
+	cleaned := path.Clean("/" + urlPath)
+	if cleaned != "/api" && !strings.HasPrefix(cleaned, "/api/") {
+		return true
+	}
+	switch cleaned {
+	case "/api/health",
+		"/api/auth/status",
+		"/api/auth/setup",
+		"/api/auth/login",
+		"/api/auth/logout":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {

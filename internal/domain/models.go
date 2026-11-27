@@ -130,3 +130,20 @@ type ExportBundle struct {
 	Settings   GlobalSettings `json:"settings" yaml:"settings"`
 	Jobs       []Job          `json:"jobs" yaml:"jobs"`
 }
+
+// User represents a local administrator account.
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// Session represents an authenticated server-side login session.
+type Session struct {
+	TokenHash string    `json:"-"`
+	UserID    string    `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}

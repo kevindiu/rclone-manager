@@ -5,10 +5,13 @@ import {
   History,
   LayoutDashboard,
   ListChecks,
+  Loader2,
+  LogOut,
   Settings,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { api } from './api/client';
+import { api, setUnauthorizedHandler } from './api/client';
+import { LoginPage } from './features/auth/LoginPage';
 import { BrowsePage } from './features/browse/BrowsePage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { HistoryPage } from './features/history/HistoryPage';
@@ -20,6 +23,7 @@ import { type Tab, useRoute } from './hooks/useRoute';
 import { useSSE } from './hooks/useSSE';
 import { useToast } from './hooks/useToast';
 import type {
+  AuthUser,
   GlobalSettings,
   JobRun,
   JobWithStatus,
@@ -45,6 +49,11 @@ export function App() {
   const { tab, browseRemote, navigate } = useRoute();
   const { toast, showToast } = useToast();
 
+  const [authLoading, setAuthLoading] = useState(true);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const authenticated = currentUser !== null;
+
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [settings, setSettings] = useState<GlobalSettings>(DEFAULT_SETTINGS);
   const [jobs, setJobs] = useState<JobWithStatus[]>([]);
@@ -54,7 +63,45 @@ export function App() {
   const [historySignal, setHistorySignal] = useState(0);
   const [logRun, setLogRun] = useState<JobRun | null>(null);
 
+  const clearSessionState = useCallback(() => {
+    setCurrentUser(null);
+    setSystemInfo(null);
+    setJobs([]);
+    setRemotes([]);
+    setRecentRuns([]);
+    setLogRun(null);
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearSessionState();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [clearSessionState]);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .authStatus()
+      .then((status) => {
+        if (!active) return;
+        setSetupRequired(status.setup_required);
+        setCurrentUser(status.authenticated && status.user ? status.user : null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCurrentUser(null);
+      })
+      .finally(() => {
+        if (active) setAuthLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const refreshCore = useCallback(async () => {
+    if (!authenticated) return;
     try {
       const [sys, sett, jobList, remList, runRes] = await Promise.all([
         api.getSystemInfo(),
@@ -69,26 +116,73 @@ export function App() {
       setRemotes(remList);
       setRecentRuns(runRes.runs ?? []);
     } catch {
-      // handled silently on background refresh
+      // handled silently on background refresh (401 clears session via unauthorizedHandler)
     }
-  }, []);
+  }, [authenticated]);
 
   useEffect(() => {
+    if (!authenticated) return;
     void refreshCore();
     api
       .listProviders()
       .then(setProviders)
       .catch(() => {});
-  }, [refreshCore]);
+  }, [authenticated, refreshCore]);
+
+  const handleSSEError = useCallback(() => {
+    api
+      .authStatus()
+      .then((st) => {
+        if (!st.authenticated) {
+          setSetupRequired(st.setup_required);
+          clearSessionState();
+        }
+      })
+      .catch(() => {});
+  }, [clearSessionState]);
 
   const { activeRuns, connected: sseConnected } = useSSE({
+    enabled: authenticated,
     onRunStarted: () => void refreshCore(),
     onRunCompleted: () => {
       setHistorySignal((n) => n + 1);
       void refreshCore();
     },
     onJobUpdated: () => void refreshCore(),
+    onError: handleSSEError,
   });
+
+  const handleLogout = async () => {
+    try {
+      await api.authLogout();
+    } catch {
+      // clear local state even if network failed
+    }
+    setSetupRequired(false);
+    clearSessionState();
+    showToast('Signed out');
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-dvh bg-slate-950 text-slate-300 flex items-center justify-center gap-2 text-sm">
+        <Loader2 className="w-5 h-5 animate-spin text-sky-400" />
+        <span>Checking authentication...</span>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <LoginPage
+        setupRequired={setupRequired}
+        onAuthenticated={(user) => {
+          setSetupRequired(false);
+          setCurrentUser(user);
+        }}
+      />
+    );
+  }
 
   const navItems: { key: Tab; label: string; icon: typeof LayoutDashboard }[] = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -142,16 +236,32 @@ export function App() {
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800 text-xs flex items-center justify-between text-slate-400">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                sseConnected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'
-              }`}
-            />
-            {sseConnected ? 'Live SSE' : 'Reconnecting'}
-          </span>
-          <span className="font-mono text-[11px]">{settings.timezone}</span>
+        <div className="p-4 border-t border-slate-800 space-y-2.5 text-xs text-slate-400">
+          <div className="flex items-center justify-between">
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  sseConnected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'
+                }`}
+              />
+              {sseConnected ? 'Live SSE' : 'Reconnecting'}
+            </span>
+            <span className="font-mono text-[11px]">{settings.timezone}</span>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+            <span className="truncate font-medium text-slate-300" title={currentUser.username}>
+              {currentUser.username}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="inline-flex items-center gap-1 text-slate-400 hover:text-rose-300 transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -161,7 +271,7 @@ export function App() {
           <img src="/icon.svg" alt="logo" className="w-7 h-7 rounded-lg" />
           <span className="font-bold text-sm text-slate-100">rclone-manager</span>
         </div>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-2.5 text-xs">
           {activeRuns.length > 0 && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">
               <Activity className="w-3 h-3 animate-pulse" />
@@ -174,6 +284,15 @@ export function App() {
             }`}
             title={sseConnected ? 'Live SSE connected' : 'Reconnecting'}
           />
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            aria-label="Sign out"
+            title={`Sign out (${currentUser.username})`}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-slate-800"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
@@ -215,7 +334,13 @@ export function App() {
             />
           )}
           {tab === 'browse' && (
-            <BrowsePage remotes={remotes} initialRemote={browseRemote} onToast={showToast} />
+            <BrowsePage
+              remotes={remotes}
+              jobs={jobs}
+              activeRuns={activeRuns}
+              initialRemote={browseRemote}
+              onToast={showToast}
+            />
           )}
           {tab === 'history' && (
             <HistoryPage
@@ -229,6 +354,7 @@ export function App() {
             <SettingsPage
               settings={settings}
               systemInfo={systemInfo}
+              currentUser={currentUser}
               onSaved={() => void refreshCore()}
               onToast={showToast}
             />

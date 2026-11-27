@@ -19,6 +19,7 @@ type Store interface {
 	ListJobs(ctx context.Context) ([]domain.Job, error)
 	GetJob(ctx context.Context, id string) (*domain.Job, error)
 	PruneOldRuns(ctx context.Context, retentionDays int) (int64, error)
+	PruneExpiredSessions(ctx context.Context) (int64, error)
 }
 
 // JobStarter launches a job run when its cron schedule fires.
@@ -126,6 +127,11 @@ func (s *Scheduler) Reload() error {
 			s.logger.Warn("daily log retention prune failed", "error", err)
 		} else if pruned > 0 {
 			s.logger.Info("daily maintenance pruned expired job runs", "count", pruned)
+		}
+		if prunedSessions, err := s.store.PruneExpiredSessions(bgCtx); err != nil {
+			s.logger.Warn("daily expired session prune failed", "error", err)
+		} else if prunedSessions > 0 {
+			s.logger.Info("daily maintenance pruned expired sessions", "count", prunedSessions)
 		}
 	}); err != nil {
 		s.logger.Error("failed to register maintenance cron", "error", err)

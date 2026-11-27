@@ -17,6 +17,7 @@ Repository guide and engineering standards for AI coding agents working on `rclo
 ```text
 cmd/rclone-manager/main.go      # Composition root: slog, DB, rclone, runner, scheduler, service, HTTP server
 internal/
+  auth/                         # Password hashing (PBKDF2-SHA256), session token generation, login rate limiting
   config/                       # Environment variable loading & directory initialization
   domain/                       # Core domain structs only (GlobalSettings, Job, JobRun, TransferProgress, ExportBundle)
   db/                           # SQLite store (WAL mode, PRAGMA user_version migrations, context-aware queries)
@@ -65,6 +66,7 @@ Follow these invariants whenever modifying or adding features:
 - For subprocess cancellation, use `exec.CommandContext` with `cmd.Cancel` (`SIGINT`) and `cmd.WaitDelay` — never spawn untracked `time.Sleep` PID-kill goroutines.
 
 ### 4. HTTP Security & Streaming (`internal/api`, `internal/service`)
+- **Mandatory authentication**: All `/api/*` endpoints (except `GET /api/health` and `/api/auth/{status,setup,login,logout}`) require a valid `HttpOnly` SQLite-backed session cookie (`rclone_manager_session`) and must return `401 Unauthorized` otherwise. Never add a flag or env var to disable login.
 - **CORS**: Never emit `Access-Control-Allow-Origin: *` by default; CORS headers are emitted only when `RCLONE_MANAGER_CORS_ORIGINS` matches the request `Origin`.
 - Preserve baseline security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`).
 - Never return raw passwords, secret keys, tokens, or crypt passphrases to the frontend — always mask with `rclone.MaskedSecret`.

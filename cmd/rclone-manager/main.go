@@ -90,8 +90,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc := service.New(store, runEngine, sched, hub, cfg.Defaults, logger)
-	apiSrv := api.NewServer(cfg, svc, client, runEngine, hub, web.DistFS, version, logger)
+	svc := service.New(store, runEngine, sched, hub, client, cfg.Defaults, logger)
+	authSvc := service.NewAuthService(store, cfg.SessionTTL, logger)
+	if err := authSvc.SeedAdminFromEnv(ctx, cfg.AdminUser, cfg.AdminPassword); err != nil {
+		logger.Error("seed admin user failed", "error", err)
+		os.Exit(1)
+	}
+	if prunedSessions, err := authSvc.PruneExpiredSessions(ctx); err != nil {
+		logger.Warn("initial expired session pruning failed", "error", err)
+	} else if prunedSessions > 0 {
+		logger.Info("pruned expired sessions", "count", prunedSessions)
+	}
+
+	apiSrv := api.NewServer(cfg, svc, authSvc, client, runEngine, hub, web.DistFS, version, logger)
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           apiSrv.Handler(),

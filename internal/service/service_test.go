@@ -12,6 +12,7 @@ import (
 
 	"github.com/kevindiu/rclone-manager/internal/db"
 	"github.com/kevindiu/rclone-manager/internal/domain"
+	"github.com/kevindiu/rclone-manager/internal/rclone"
 )
 
 type mockStore struct {
@@ -101,6 +102,9 @@ func (m *mockStore) DeleteRun(_ context.Context, id string) error {
 type mockRunner struct {
 	maxConcurrent int
 	runningJobID  string
+	lastJob       domain.Job
+	lastTrigger   string
+	lastDryRun    bool
 }
 
 func (m *mockRunner) UpdateMaxConcurrent(limit int) { m.maxConcurrent = limit }
@@ -111,6 +115,9 @@ func (m *mockRunner) ActiveRunByJob(jobID string) (string, bool) {
 	return "", false
 }
 func (m *mockRunner) StartJob(job domain.Job, trigger string, dryRun bool) (*domain.JobRun, error) {
+	m.lastJob = job
+	m.lastTrigger = trigger
+	m.lastDryRun = dryRun
 	return &domain.JobRun{ID: "run-1", JobID: job.ID, Trigger: trigger, DryRun: dryRun}, nil
 }
 func (m *mockRunner) StopJob(string) error { return nil }
@@ -128,23 +135,42 @@ func (m *mockHub) Broadcast(eventType string, _ any) {
 	m.events = append(m.events, eventType)
 }
 
-func newTestService() (*AppService, *mockStore, *mockRunner, *mockScheduler, *mockHub) {
+type mockBrowser struct {
+	missingRemote string
+	lastExtra     []rclone.VersionRootCandidate
+	versions      []rclone.FileVersion
+}
+
+func (m *mockBrowser) EnsureRemoteExists(_ context.Context, name string) error {
+	if m.missingRemote != "" && name == m.missingRemote {
+		return rclone.ErrRemoteNotFound
+	}
+	return nil
+}
+
+func (m *mockBrowser) ListVersions(_ context.Context, _, _ string, extra []rclone.VersionRootCandidate) ([]rclone.FileVersion, error) {
+	m.lastExtra = extra
+	return m.versions, nil
+}
+
+func newTestService() (*AppService, *mockStore, *mockRunner, *mockScheduler, *mockHub, *mockBrowser) {
 	st := newMockStore()
 	rn := &mockRunner{}
 	sc := &mockScheduler{}
 	hb := &mockHub{}
+	br := &mockBrowser{}
 	defaults := domain.GlobalSettings{
 		Transfers:         4,
 		Checkers:          8,
 		Timezone:          "UTC",
 		MaxConcurrentJobs: 2,
 	}
-	return New(st, rn, sc, hb, defaults, slog.Default()), st, rn, sc, hb
+	return New(st, rn, sc, hb, br, defaults, slog.Default()), st, rn, sc, hb, br
 }
 
 func TestUpdateSettingsAndImportBundleValidation(t *testing.T) {
 	ctx := context.Background()
-	svc, _, rn, sc, _ := newTestService()
+	svc, _, rn, sc, _, _ := newTestService()
 
 	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "Mars/Olympus"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected ErrValidation for bad timezone, got %v", err)
@@ -168,7 +194,7 @@ func TestUpdateSettingsAndImportBundleValidation(t *testing.T) {
 
 func TestDeleteGuards(t *testing.T) {
 	ctx := context.Background()
-	svc, st, rn, _, _ := newTestService()
+	svc, st, rn, _, _, _ := newTestService()
 	st.jobs["j1"] = domain.Job{ID: "j1", Name: "J1", Source: "/a", Destination: "/b"}
 	rn.runningJobID = "j1"
 
@@ -184,7 +210,7 @@ func TestDeleteGuards(t *testing.T) {
 
 func TestReadRunLogsTailsOversizedFile(t *testing.T) {
 	ctx := context.Background()
-	svc, st, _, _, _ := newTestService()
+	svc, st, _, _, _, _ := newTestService()
 
 	logPath := filepath.Join(t.TempDir(), "big.log")
 	var sb strings.Builder
@@ -208,5 +234,63 @@ func TestReadRunLogsTailsOversizedFile(t *testing.T) {
 	}
 	if res.Lines[len(res.Lines)-1].Msg != "line-199" {
 		t.Fatalf("expected final line to be line-199, got %q", res.Lines[len(res.Lines)-1].Msg)
+	}
+}
+
+func TestStartRestoreAndListFileVersions(t *testing.T) {
+	ctx := context.Background()
+	svc, st, rn, _, _, br := newTestService()
+	br.missingRemote = "ghost"
+
+	// Unknown remote returns ErrRemoteNotFound
+	if _, err := svc.StartRestore(ctx, rclone.RestoreRequest{
+		SourceRemote: "ghost",
+		SourcePath:   "a.txt",
+		TargetPath:   "/tmp/a.txt",
+	}); !errors.Is(err, rclone.ErrRemoteNotFound) {
+		t.Fatalf("expected ErrRemoteNotFound, got %v", err)
+	}
+
+	// Invalid conflict_mode returns ErrValidation
+	if _, err := svc.StartRestore(ctx, rclone.RestoreRequest{
+		SourceRemote: "r2",
+		SourcePath:   "a.txt",
+		TargetPath:   "/tmp/a.txt",
+		ConflictMode: "bogus",
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+
+	// Skip conflict + dry_run maps to --ignore-existing + restore_dry_run
+	run, err := svc.StartRestore(ctx, rclone.RestoreRequest{
+		SourceRemote: "r2",
+		SourcePath:   "_versions/2026-11-26/photo.jpg",
+		TargetPath:   "/data/photo.jpg",
+		ConflictMode: "skip",
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatalf("StartRestore failed: %v", err)
+	}
+	if run.Trigger != "restore_dry_run" || !run.DryRun {
+		t.Fatalf("unexpected run metadata: %+v", run)
+	}
+	if rn.lastJob.Operation != "copyto" || rn.lastJob.CustomFlags != "--ignore-existing" {
+		t.Fatalf("unexpected synthetic restore job: %+v", rn.lastJob)
+	}
+
+	// Job with custom backup_dir_base should be passed as candidate to ListVersions
+	st.jobs["j1"] = domain.Job{
+		ID:                "j1",
+		Name:              "Photos",
+		Destination:       "r2:backups/photos",
+		VersioningEnabled: true,
+		BackupDirBase:     "r2:archive/photos-vers",
+	}
+	if _, err := svc.ListFileVersions(ctx, "r2", "backups/photos/2026/a.jpg"); err != nil {
+		t.Fatalf("ListFileVersions failed: %v", err)
+	}
+	if len(br.lastExtra) != 1 || br.lastExtra[0].BackupRoot != "archive/photos-vers" || br.lastExtra[0].RelPath != "2026/a.jpg" {
+		t.Fatalf("unexpected extra version candidates: %+v", br.lastExtra)
 	}
 }

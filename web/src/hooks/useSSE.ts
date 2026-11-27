@@ -3,23 +3,34 @@ import { connectSSE } from '../api/client';
 import type { ActiveRunSnapshot } from '../types/api';
 
 export function useSSE({
+  enabled = true,
   onRunCompleted,
   onJobUpdated,
   onRunStarted,
+  onError,
 }: {
+  enabled?: boolean;
   onRunCompleted?: () => void;
   onJobUpdated?: () => void;
   onRunStarted?: () => void;
+  onError?: () => void;
 }) {
   const [activeRuns, setActiveRuns] = useState<ActiveRunSnapshot[]>([]);
   const [connected, setConnected] = useState(false);
 
-  const callbacksRef = useRef({ onRunCompleted, onJobUpdated, onRunStarted });
-  callbacksRef.current = { onRunCompleted, onJobUpdated, onRunStarted };
+  const callbacksRef = useRef({ onRunCompleted, onJobUpdated, onRunStarted, onError });
+  callbacksRef.current = { onRunCompleted, onJobUpdated, onRunStarted, onError };
 
   useEffect(() => {
+    if (!enabled) {
+      setActiveRuns([]);
+      setConnected(false);
+      return;
+    }
+
     return connectSSE({
       onStatusChange: setConnected,
+      onError: () => callbacksRef.current.onError?.(),
       onSnapshot: (runs) => setActiveRuns(runs),
       onRunStarted: (run) => {
         setActiveRuns((prev) => [...prev.filter((r) => r.run_id !== run.run_id), run]);
@@ -39,7 +50,7 @@ export function useSSE({
         callbacksRef.current.onJobUpdated?.();
       },
     });
-  }, []);
+  }, [enabled]);
 
   return { activeRuns, connected };
 }

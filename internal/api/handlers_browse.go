@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/rclone"
+	"github.com/kevindiu/rclone-manager/internal/service"
 )
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
@@ -81,19 +82,52 @@ func (s *Server) handleBrowseDownload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleBrowseVersions(w http.ResponseWriter, r *http.Request) {
+	remote := strings.TrimSpace(r.URL.Query().Get("remote"))
+	subpath := r.URL.Query().Get("path")
+	if remote == "" || strings.TrimSpace(subpath) == "" {
+		writeError(w, http.StatusBadRequest, "remote and path query parameters are required")
+		return
+	}
+	versions, err := s.svc.ListFileVersions(r.Context(), remote, subpath)
+	if errors.Is(err, rclone.ErrRemoteNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrValidation) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cleanSub, _ := rclone.CleanSubpath(subpath)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"remote":   remote,
+		"path":     cleanSub,
+		"versions": versions,
+	})
+}
+
 func (s *Server) handleBrowseRestore(w http.ResponseWriter, r *http.Request) {
 	var req rclone.RestoreRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
 		return
 	}
-	output, err := s.client.Restore(r.Context(), req)
-	if err != nil {
+	run, err := s.svc.StartRestore(r.Context(), req)
+	if errors.Is(err, rclone.ErrRemoteNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrValidation) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "restored",
-		"message": output,
-	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, run)
 }

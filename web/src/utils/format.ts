@@ -1,3 +1,5 @@
+import type { JobWithStatus } from '../types/api';
+
 export function formatBytes(bytes?: number | null): string {
   if (bytes === undefined || bytes === null || Number.isNaN(bytes)) return '—';
   if (bytes === 0) return '0 B';
@@ -63,7 +65,6 @@ export function formatRelative(iso?: string | null): string {
 }
 
 export function suggestRestoreTarget(remote: string, sourcePath: string): string {
-  // If path is inside _versions/YYYY-MM-DD/foo/bar.txt -> suggest remote:foo/bar.txt
   const normalized = sourcePath.replace(/^\/+/, '');
   const versionMatch = normalized.match(/^_versions\/[^/]+\/(.+)$/);
   if (versionMatch) {
@@ -74,6 +75,116 @@ export function suggestRestoreTarget(remote: string, sourcePath: string): string
     return `${remote}:${nestedVersionMatch[1]}/${nestedVersionMatch[2]}`;
   }
   return `${remote}:${normalized}`;
+}
+
+function normalizeRcloneBase(p: string): string {
+  const trimmed = p.trim();
+  if (trimmed.endsWith(':')) return trimmed;
+  return trimmed.replace(/\/+$/, '');
+}
+
+function joinRcloneSub(base: string, rel: string): string {
+  const cleanRel = rel.replace(/^\/+/, '');
+  if (!cleanRel) return base;
+  if (base.endsWith(':')) return `${base}${cleanRel}`;
+  return `${base.replace(/\/+$/, '')}/${cleanRel}`;
+}
+
+function matchPathUnderBase(fullTarget: string, base: string): string | null {
+  const normBase = normalizeRcloneBase(base);
+  const normFull = normalizeRcloneBase(fullTarget);
+  if (normBase.endsWith(':')) {
+    if (normFull.startsWith(normBase) && normFull.length > normBase.length) {
+      return normFull.slice(normBase.length).replace(/^\/+/, '');
+    }
+    return null;
+  }
+  const prefix = `${normBase}/`;
+  if (normFull.startsWith(prefix)) {
+    return normFull.slice(prefix.length);
+  }
+  return null;
+}
+
+export interface RestoreSuggestion {
+  label: string;
+  target: string;
+  recommended?: boolean;
+  syncJobName?: string;
+}
+
+export function computeRestoreSuggestions(
+  remote: string,
+  sourcePath: string,
+  jobs: JobWithStatus[]
+): RestoreSuggestion[] {
+  const cloudOriginal = suggestRestoreTarget(remote, sourcePath);
+  const fullSrc = `${remote}:${sourcePath.replace(/^\/+/, '')}`;
+  const suggestions: RestoreSuggestion[] = [];
+  const seen = new Set<string>();
+
+  for (const job of jobs) {
+    // Check if sourcePath is inside a custom backup_dir_base/<date>/<rel>
+    if (job.versioning_enabled && job.backup_dir_base) {
+      const underBackup = matchPathUnderBase(fullSrc, job.backup_dir_base);
+      if (underBackup) {
+        const idx = underBackup.indexOf('/');
+        if (idx > 0) {
+          const rel = underBackup.slice(idx + 1);
+          const sourceTarget = joinRcloneSub(job.source, rel);
+          if (!seen.has(sourceTarget)) {
+            seen.add(sourceTarget);
+            suggestions.push({
+              label: `Original Source (${job.name})`,
+              target: sourceTarget,
+              recommended: job.operation === 'sync',
+            });
+          }
+        }
+      }
+    }
+
+    // Check if logical cloud path matches job.destination
+    const relFromDest = matchPathUnderBase(cloudOriginal, job.destination);
+    if (relFromDest !== null) {
+      const sourceTarget = joinRcloneSub(job.source, relFromDest);
+      if (!seen.has(sourceTarget)) {
+        seen.add(sourceTarget);
+        suggestions.push({
+          label: `Original Source (${job.name})`,
+          target: sourceTarget,
+          recommended: job.operation === 'sync',
+        });
+      }
+    }
+  }
+
+  const syncMatch = findSyncJobMatchingTarget(cloudOriginal, jobs);
+  if (!seen.has(cloudOriginal)) {
+    seen.add(cloudOriginal);
+    suggestions.push({
+      label: 'Original Cloud Location',
+      target: cloudOriginal,
+      syncJobName: syncMatch?.name,
+    });
+  }
+
+  return suggestions;
+}
+
+export function findSyncJobMatchingTarget(
+  targetPath: string,
+  jobs: JobWithStatus[]
+): JobWithStatus | null {
+  const trimmed = targetPath.trim();
+  if (!trimmed) return null;
+  for (const job of jobs) {
+    if (job.operation !== 'sync') continue;
+    if (matchPathUnderBase(trimmed, job.destination) !== null) {
+      return job;
+    }
+  }
+  return null;
 }
 
 export const COMMON_TIMEZONES = [

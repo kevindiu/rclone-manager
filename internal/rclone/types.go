@@ -85,4 +85,22 @@ type RestoreRequest struct {
 	SourcePath   string `json:"source_path"`
 	TargetPath   string `json:"target_path"`
 	IsDir        bool   `json:"is_dir"`
+	ConflictMode string `json:"conflict_mode,omitempty"` // "overwrite" | "skip" | "newer_only"
+	DryRun       bool   `json:"dry_run,omitempty"`
+}
+
+// FileVersion represents a dated historical version of a file or directory found in backup-dir storage.
+type FileVersion struct {
+	Date       string `json:"date"`
+	SourcePath string `json:"source_path"`
+	Size       int64  `json:"size"`
+	ModTime    string `json:"mod_time,omitempty"`
+	IsDir      bool   `json:"is_dir"`
+	BackupRoot string `json:"backup_root"`
+}
+
+// VersionRootCandidate describes a candidate backup-dir root on a remote and the relative path inside it.
+type VersionRootCandidate struct {
+	BackupRoot string
+	RelPath    string
 }

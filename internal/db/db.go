@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -60,6 +61,27 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_job_started ON job_runs(job_id, started_
 CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_runs_status ON job_runs(status);
 `,
+	// Version 2: authentication users & sessions
+	`
+CREATE TABLE IF NOT EXISTS users (
+	id TEXT PRIMARY KEY,
+	username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+	password_hash TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+	token_hash TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	expires_at TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+`,
 }
 
 // Open opens (or creates) the SQLite database at dbPath, configures WAL mode
@@ -82,6 +104,14 @@ func Open(dbPath string) (*Store, error) {
 	if err := sqlDB.Ping(); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
+	}
+
+	if dbPath != "" && dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
+		filePath := dbPath
+		if idx := strings.IndexByte(filePath, '?'); idx >= 0 {
+			filePath = filePath[:idx]
+		}
+		_ = os.Chmod(filePath, 0o600)
 	}
 
 	s := &Store{db: sqlDB}

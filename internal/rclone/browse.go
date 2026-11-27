@@ -11,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -220,28 +221,115 @@ func (c *Client) StreamFile(ctx context.Context, remote, subpath string, w io.Wr
 	return nil
 }
 
-// Restore copies a file or directory from source_remote:source_path to target_path.
-func (c *Client) Restore(ctx context.Context, req RestoreRequest) (string, error) {
-	if err := c.ensureRemoteExists(ctx, req.SourceRemote); err != nil {
-		return "", err
+// EnsureRemoteExists verifies that the named remote exists in rclone.conf.
+func (c *Client) EnsureRemoteExists(ctx context.Context, name string) error {
+	return c.ensureRemoteExists(ctx, name)
+}
+
+// ListVersions scans default _versions ancestor folders and any extra job-configured
+// backup roots on remote to find historical versions of subpath.
+func (c *Client) ListVersions(ctx context.Context, remote, subpath string, extraCandidates []VersionRootCandidate) ([]FileVersion, error) {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return nil, err
 	}
-	srcTarget, err := FormatRemoteTarget(req.SourceRemote, req.SourcePath)
+	cleanPath, err := CleanSubpath(subpath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	target := strings.TrimSpace(req.TargetPath)
-	if target == "" {
-		return "", errors.New("target_path is required")
+	if cleanPath == "" {
+		return []FileVersion{}, nil
 	}
 
-	op := "copyto"
-	if req.IsDir {
-		op = "copy"
+	candidates := buildVersionCandidates(cleanPath, extraCandidates)
+	versions := make([]FileVersion, 0)
+	var mu sync.Mutex
+
+	for _, cand := range candidates {
+		rootTarget, err := FormatRemoteTarget(remote, cand.BackupRoot)
+		if err != nil {
+			continue
+		}
+		dates, err := c.ListDirs(ctx, rootTarget)
+		if err != nil || len(dates) == 0 {
+			continue
+		}
+
+		sem := make(chan struct{}, 6)
+		var wg sync.WaitGroup
+		for _, dateDir := range dates {
+			dateDir := dateDir
+			versionSub := path.Join(cand.BackupRoot, dateDir, cand.RelPath)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+					defer func() { <-sem }()
+				case <-ctx.Done():
+					return
+				}
+
+				stat, err := c.StatFile(ctx, remote, versionSub)
+				if err != nil || stat == nil {
+					return
+				}
+				mu.Lock()
+				versions = append(versions, FileVersion{
+					Date:       dateDir,
+					SourcePath: versionSub,
+					Size:       stat.Size,
+					ModTime:    stat.ModTime,
+					IsDir:      stat.IsDir,
+					BackupRoot: cand.BackupRoot,
+				})
+				mu.Unlock()
+			}()
+		}
+		wg.Wait()
 	}
-	cmd := exec.CommandContext(ctx, c.bin, "--config", c.confPath, op, srcTarget, target, "-v")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("restore failed: %s (%v)", strings.TrimSpace(string(out)), err)
+
+	sort.Slice(versions, func(i, j int) bool {
+		if versions[i].Date != versions[j].Date {
+			return versions[i].Date > versions[j].Date
+		}
+		return versions[i].ModTime > versions[j].ModTime
+	})
+	return versions, nil
+}
+
+func buildVersionCandidates(cleanPath string, extra []VersionRootCandidate) []VersionRootCandidate {
+	seen := make(map[string]struct{})
+	out := make([]VersionRootCandidate, 0, len(extra)+4)
+
+	add := func(root, rel string) {
+		r, err1 := CleanSubpath(root)
+		rl, err2 := CleanSubpath(rel)
+		if err1 != nil || err2 != nil || rl == "" {
+			return
+		}
+		key := r + "|" + rl
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, VersionRootCandidate{BackupRoot: r, RelPath: rl})
 	}
-	return strings.TrimSpace(string(out)), nil
+
+	for _, c := range extra {
+		add(c.BackupRoot, c.RelPath)
+	}
+
+	// Default ancestor _versions folders (e.g. a/b/c.txt -> a/b/_versions + c.txt, a/_versions + b/c.txt, _versions + a/b/c.txt)
+	dir := path.Dir(cleanPath)
+	for {
+		if dir == "." || dir == "/" || dir == "" {
+			add("_versions", cleanPath)
+			break
+		}
+		rel := strings.TrimPrefix(cleanPath, dir+"/")
+		add(path.Join(dir, "_versions"), rel)
+		dir = path.Dir(dir)
+	}
+
+	return out
 }

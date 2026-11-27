@@ -5,30 +5,39 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/domain"
 )
 
+const (
+	defaultSessionTTL = 168 * time.Hour
+	minSessionTTL     = 5 * time.Minute
+)
+
 // Config holds startup environment configuration and default settings seeds.
 type Config struct {
-	Host         string
-	Port         string
-	DataDir      string
-	DBPath       string
-	RcloneConfig string
-	LogDir       string
-	RcloneBin    string
-	LogLevel     string
-	LogFormat    string
-	CORSOrigins  []string
-	Defaults     domain.GlobalSettings
+	Host          string
+	Port          string
+	DataDir       string
+	DBPath        string
+	RcloneConfig  string
+	LogDir        string
+	RcloneBin     string
+	LogLevel      string
+	LogFormat     string
+	CORSOrigins   []string
+	AdminUser     string
+	AdminPassword string
+	SessionTTL    time.Duration
+	Defaults      domain.GlobalSettings
 }
 
 // Load reads configuration from environment variables with sensible defaults
 // and ensures required directories exist.
 func Load() (*Config, error) {
 	dataDir := getEnv("RCLONE_MANAGER_DATA_DIR", "./data")
-	port := getEnv("PORT", getEnv("RCLONE_MANAGER_PORT", "8080"))
+	port := getEnv("PORT", "8080")
 	host := getEnv("RCLONE_MANAGER_HOST", "0.0.0.0")
 	dbPath := getEnv("RCLONE_MANAGER_DB_PATH", filepath.Join(dataDir, "rclone-manager.db"))
 	rcloneConf := getEnv("RCLONE_CONFIG", filepath.Join(dataDir, "rclone.conf"))
@@ -37,7 +46,7 @@ func Load() (*Config, error) {
 	logLevel := strings.ToLower(strings.TrimSpace(getEnv("RCLONE_MANAGER_LOG_LEVEL", "info")))
 	logFormat := strings.ToLower(strings.TrimSpace(getEnv("RCLONE_MANAGER_LOG_FORMAT", "text")))
 
-	tz := getEnv("RCLONE_TIMEZONE", getEnv("TZ", "UTC"))
+	tz := getEnv("TZ", "UTC")
 	if strings.TrimSpace(tz) == "" {
 		tz = "UTC"
 	}
@@ -51,17 +60,27 @@ func Load() (*Config, error) {
 		}
 	}
 
+	adminUser := strings.TrimSpace(getEnv("RCLONE_MANAGER_ADMIN_USER", ""))
+	adminPassword := getEnv("RCLONE_MANAGER_ADMIN_PASSWORD", "")
+	sessionTTL := getEnvDuration("RCLONE_MANAGER_SESSION_TTL", defaultSessionTTL)
+	if sessionTTL < minSessionTTL {
+		sessionTTL = minSessionTTL
+	}
+
 	cfg := &Config{
-		Host:         host,
-		Port:         port,
-		DataDir:      dataDir,
-		DBPath:       dbPath,
-		RcloneConfig: rcloneConf,
-		LogDir:       logDir,
-		RcloneBin:    rcloneBin,
-		LogLevel:     logLevel,
-		LogFormat:    logFormat,
-		CORSOrigins:  corsOrigins,
+		Host:          host,
+		Port:          port,
+		DataDir:       dataDir,
+		DBPath:        dbPath,
+		RcloneConfig:  rcloneConf,
+		LogDir:        logDir,
+		RcloneBin:     rcloneBin,
+		LogLevel:      logLevel,
+		LogFormat:     logFormat,
+		CORSOrigins:   corsOrigins,
+		AdminUser:     adminUser,
+		AdminPassword: adminPassword,
+		SessionTTL:    sessionTTL,
 		Defaults: domain.GlobalSettings{
 			Transfers:         getEnvInt("RCLONE_DEFAULT_TRANSFERS", 4),
 			Checkers:          getEnvInt("RCLONE_DEFAULT_CHECKERS", 8),
@@ -119,6 +138,18 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(strings.TrimSpace(v))
 	if err != nil {
 		return fallback
 	}

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -258,5 +259,116 @@ func TestRunsLifecycleRecoveryAndPruning(t *testing.T) {
 	}
 	if total != 1 || len(runs) != 1 || runs[0].ID != "run-running" {
 		t.Fatalf("unexpected remaining runs: total=%d runs=%+v", total, runs)
+	}
+}
+
+func TestUsersAndSessionsLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	count, err := store.CountUsers(ctx)
+	if err != nil {
+		t.Fatalf("CountUsers: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 users initially, got %d", count)
+	}
+
+	user, err := store.CreateInitialUser(ctx, "Admin", "hash-v1")
+	if err != nil {
+		t.Fatalf("CreateInitialUser: %v", err)
+	}
+	if user.ID == "" || user.Username != "Admin" {
+		t.Fatalf("unexpected user: %+v", user)
+	}
+
+	// Second initial user attempt must fail atomically with ErrAlreadyInitialized.
+	if _, err := store.CreateInitialUser(ctx, "other", "hash-v2"); !errors.Is(err, ErrAlreadyInitialized) {
+		t.Fatalf("expected ErrAlreadyInitialized, got %v", err)
+	}
+
+	// Case-insensitive lookup.
+	byName, err := store.GetUserByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if byName.ID != user.ID {
+		t.Fatalf("expected ID %q, got %q", user.ID, byName.ID)
+	}
+
+	// Update password.
+	if err := store.UpdateUserPassword(ctx, user.ID, "hash-v2"); err != nil {
+		t.Fatalf("UpdateUserPassword: %v", err)
+	}
+	byID, err := store.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if byID.PasswordHash != "hash-v2" {
+		t.Fatalf("expected hash-v2, got %q", byID.PasswordHash)
+	}
+
+	now := time.Now().UTC()
+	if err := store.CreateSession(ctx, domain.Session{
+		TokenHash: "tok-active-1",
+		UserID:    user.ID,
+		ExpiresAt: now.Add(time.Hour),
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSession active-1: %v", err)
+	}
+	if err := store.CreateSession(ctx, domain.Session{
+		TokenHash: "tok-active-2",
+		UserID:    user.ID,
+		ExpiresAt: now.Add(time.Hour),
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSession active-2: %v", err)
+	}
+	if err := store.CreateSession(ctx, domain.Session{
+		TokenHash: "tok-expired",
+		UserID:    user.ID,
+		ExpiresAt: now.Add(-time.Minute),
+		CreatedAt: now.Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateSession expired: %v", err)
+	}
+
+	sess, sessUser, err := store.GetSessionWithUser(ctx, "tok-active-1")
+	if err != nil {
+		t.Fatalf("GetSessionWithUser: %v", err)
+	}
+	if sess.TokenHash != "tok-active-1" || sessUser.ID != user.ID {
+		t.Fatalf("unexpected session/user: %+v %+v", sess, sessUser)
+	}
+
+	// Prune expired keeps valid sessions.
+	pruned, err := store.PruneExpiredSessions(ctx)
+	if err != nil {
+		t.Fatalf("PruneExpiredSessions: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("expected 1 pruned session, got %d", pruned)
+	}
+	if _, _, err := store.GetSessionWithUser(ctx, "tok-expired"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected expired session deleted, got %v", err)
+	}
+
+	// Revoke other sessions keeping tok-active-1.
+	if err := store.DeleteUserSessionsExcept(ctx, user.ID, "tok-active-1"); err != nil {
+		t.Fatalf("DeleteUserSessionsExcept: %v", err)
+	}
+	if _, _, err := store.GetSessionWithUser(ctx, "tok-active-2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected tok-active-2 deleted, got %v", err)
+	}
+	if _, _, err := store.GetSessionWithUser(ctx, "tok-active-1"); err != nil {
+		t.Fatalf("expected tok-active-1 preserved, got %v", err)
+	}
+
+	if err := store.DeleteSession(ctx, "tok-active-1"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if _, _, err := store.GetSessionWithUser(ctx, "tok-active-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after DeleteSession, got %v", err)
 	}
 }

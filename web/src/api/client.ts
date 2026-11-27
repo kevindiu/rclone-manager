@@ -1,6 +1,9 @@
 import type {
   ActiveRunSnapshot,
+  AuthStatus,
+  AuthUser,
   BrowseEntry,
+  FileVersion,
   GlobalSettings,
   Job,
   JobRun,
@@ -10,11 +13,19 @@ import type {
   RemoteAbout,
   RemoteInfo,
   RemoteTestResult,
+  RestoreConflictMode,
   SystemInfo,
 } from '../types/api';
 
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  unauthorizedHandler = fn;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    credentials: 'same-origin',
     headers: {
       ...(init?.body && typeof init.body === 'string' && !init.headers
         ? { 'Content-Type': 'application/json' }
@@ -23,6 +34,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
     ...init,
   });
+
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    unauthorizedHandler?.();
+  }
 
   if (!res.ok) {
     let errMsg = `HTTP ${res.status}`;
@@ -38,6 +53,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Authentication
+  authStatus: () => request<AuthStatus>('/api/auth/status'),
+  authSetup: (username: string, password: string) =>
+    request<{ user: AuthUser }>('/api/auth/setup', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  authLogin: (username: string, password: string) =>
+    request<{ user: AuthUser }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  authLogout: () =>
+    request<{ status: string }>('/api/auth/logout', {
+      method: 'POST',
+    }),
+  authChangePassword: (current_password: string, new_password: string) =>
+    request<{ status: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password, new_password }),
+    }),
+
   // System
   getSystemInfo: () => request<SystemInfo>('/api/system/info'),
 
@@ -157,10 +194,27 @@ export const api = {
     ),
   downloadUrl: (remote: string, path: string) =>
     `/api/browse/download?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`,
-  restore: (source_remote: string, source_path: string, target_path: string, is_dir: boolean) =>
-    request<{ status: string; message: string }>('/api/browse/restore', {
+  listVersions: (remote: string, path: string) =>
+    request<{ remote: string; path: string; versions: FileVersion[] }>(
+      `/api/browse/versions?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`
+    ),
+  restore: (
+    source_remote: string,
+    source_path: string,
+    target_path: string,
+    is_dir: boolean,
+    opts?: { conflict_mode?: RestoreConflictMode; dry_run?: boolean }
+  ) =>
+    request<JobRun>('/api/browse/restore', {
       method: 'POST',
-      body: JSON.stringify({ source_remote, source_path, target_path, is_dir }),
+      body: JSON.stringify({
+        source_remote,
+        source_path,
+        target_path,
+        is_dir,
+        conflict_mode: opts?.conflict_mode ?? 'overwrite',
+        dry_run: opts?.dry_run ?? false,
+      }),
     }),
 };
 
@@ -171,6 +225,7 @@ export interface SSEHandlers {
   onRunCompleted?: (run: JobRun) => void;
   onJobUpdated?: () => void;
   onStatusChange?: (connected: boolean) => void;
+  onError?: () => void;
 }
 
 export function connectSSE(handlers: SSEHandlers): () => void {
@@ -188,6 +243,7 @@ export function connectSSE(handlers: SSEHandlers): () => void {
 
     es.onerror = () => {
       handlers.onStatusChange?.(false);
+      handlers.onError?.();
       es?.close();
       if (!closed) {
         retryTimer = window.setTimeout(open, 3000);

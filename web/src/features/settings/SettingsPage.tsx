@@ -1,17 +1,19 @@
-import { Download, Loader2, Save, Server, Upload } from 'lucide-react';
+import { Download, KeyRound, Loader2, Save, Server, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
-import type { GlobalSettings, SystemInfo } from '../../types/api';
+import type { AuthUser, GlobalSettings, SystemInfo } from '../../types/api';
 import { COMMON_TIMEZONES } from '../../utils/format';
 
 export function SettingsPage({
   settings,
   systemInfo,
+  currentUser,
   onSaved,
   onToast,
 }: {
   settings: GlobalSettings;
   systemInfo: SystemInfo | null;
+  currentUser: AuthUser | null;
   onSaved: () => void;
   onToast: (msg: string, isError?: boolean) => void;
 }) {
@@ -19,6 +21,11 @@ export function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     setForm(settings);
@@ -57,6 +64,34 @@ export function SettingsPage({
     } finally {
       setImporting(false);
       e.target.value = '';
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentPassword) {
+      onToast('Current password is required', true);
+      return;
+    }
+    if (newPassword.length < 8) {
+      onToast('New password must be at least 8 characters', true);
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      onToast('New passwords do not match', true);
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await api.authChangePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      onToast('Password updated. Other active sessions were signed out.');
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to update password', true);
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -283,6 +318,96 @@ export function SettingsPage({
           </label>
         </div>
       </div>
+
+      <form
+        onSubmit={handleChangePassword}
+        className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-sky-400" />
+              Account Security
+            </h3>
+            <p className="text-xs text-slate-400">
+              Update your administrator password. Updating it revokes other signed-in sessions.
+            </p>
+          </div>
+          {currentUser && (
+            <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
+              {currentUser.username}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label
+              htmlFor="settings-current-password"
+              className="block text-xs font-medium text-slate-300 mb-1"
+            >
+              Current Password
+            </label>
+            <input
+              id="settings-current-password"
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="settings-new-password"
+              className="block text-xs font-medium text-slate-300 mb-1"
+            >
+              New Password (min 8 chars)
+            </label>
+            <input
+              id="settings-new-password"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="settings-confirm-password"
+              className="block text-xs font-medium text-slate-300 mb-1"
+            >
+              Confirm New Password
+            </label>
+            <input
+              id="settings-confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmNewPassword}
+              onChange={(e) => setConfirmNewPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={changingPassword}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:opacity-50"
+          >
+            {changingPassword ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <KeyRound className="w-4 h-4 text-sky-400" />
+            )}
+            Update Password
+          </button>
+        </div>
+      </form>
 
       {systemInfo && (
         <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">

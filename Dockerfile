@@ -30,6 +30,7 @@ FROM alpine:3.24
 ARG RCLONE_VERSION=1.76.0
 LABEL org.opencontainers.image.title="rclone-manager" \
       org.opencontainers.image.description="Self-hosted, provider-agnostic rclone backup & cloud storage manager" \
+      org.opencontainers.image.source="https://github.com/kevindiu/rclone-manager" \
       org.rclone.version="${RCLONE_VERSION}"
 
 RUN apk add --no-cache ca-certificates tzdata \
@@ -45,14 +46,11 @@ USER app
 VOLUME ["/config"]
 
 ENV RCLONE_MANAGER_DATA_DIR=/config \
-    RCLONE_CONFIG=/config/rclone.conf \
-    RCLONE_MANAGER_LOG_DIR=/config/logs \
-    RCLONE_MANAGER_DB_PATH=/config/rclone-manager.db \
     PORT=8080
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 || exit 1
+    CMD wget -qO- "http://127.0.0.1:${PORT:-8080}/api/health" >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["/usr/local/bin/rclone-manager"]

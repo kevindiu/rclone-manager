@@ -174,6 +174,17 @@ export interface BrowseEntry {
   IsDir: boolean;
 }
 
+export type RestoreConflictMode = 'overwrite' | 'skip' | 'newer_only';
+
+export interface FileVersion {
+  date: string;
+  source_path: string;
+  size: number;
+  mod_time?: string;
+  is_dir: boolean;
+  backup_root: string;
+}
+
 export interface SystemInfo {
   app_version: string;
   rclone_version: string;
@@ -192,4 +203,15 @@ export interface ParsedLogLine {
   object?: string;
   size?: number;
   is_stats?: boolean;
+}
+
+export interface AuthUser {
+  id: string;
+  username: string;
+}
+
+export interface AuthStatus {
+  authenticated: boolean;
+  setup_required: boolean;
+  user?: AuthUser;
 }
