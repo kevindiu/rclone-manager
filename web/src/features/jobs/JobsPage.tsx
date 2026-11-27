@@ -25,6 +25,7 @@ import type {
   JobWithStatus,
   RemoteInfo,
 } from '../../types/api';
+import { describeCronSchedule } from '../../utils/cron';
 import {
   formatBytes,
   formatDateTime,
@@ -292,9 +293,11 @@ export function JobsPage({
 
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/70 text-xs text-slate-400">
                   <div className="flex flex-wrap items-center gap-3">
-                    <span>
+                    <span title={job.schedule || 'Manual only'}>
                       Schedule:{' '}
-                      <code className="text-slate-200">{job.schedule || 'Manual only'}</code>
+                      <span className="text-slate-200 font-medium">
+                        {describeCronSchedule(job.schedule ?? '')}
+                      </span>
                     </span>
                     {job.enabled && job.next_run && (
                       <span>

@@ -6,6 +6,7 @@ import {
   File,
   Folder,
   FolderPlus,
+  FolderUp,
   HardDrive,
   History,
   Loader2,
@@ -17,7 +18,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ActiveRunCard } from '../../components/ui/ActiveRunCard';
@@ -33,6 +34,11 @@ import type {
   RemoteInfo,
 } from '../../types/api';
 import { formatBytes, formatDateTime } from '../../utils/format';
+import {
+  buildUploadQueueFromFileList,
+  collectDroppedEntries,
+  type QueuedUpload,
+} from '../../utils/upload';
 import { PathPickerModal } from '../jobs/PathPickerModal';
 import { FilePreviewModal, isPreviewableFile } from './FilePreviewModal';
 import { RestoreModal } from './RestoreModal';
@@ -65,6 +71,14 @@ export function BrowsePage({
   const [dirSize, setDirSize] = useState<DirSize | null>(null);
   const [loadingSize, setLoadingSize] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+    current: string;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const [showMkdir, setShowMkdir] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -253,20 +267,151 @@ export function BrowsePage({
     }
   };
 
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.currentTarget;
-    const file = input.files?.[0];
-    if (!file || !remote) return;
+  const runUploadQueue = async (queue: QueuedUpload[], emptyDirs: string[] = []) => {
+    if (!remote || (queue.length === 0 && emptyDirs.length === 0)) return;
+    const total = queue.length + emptyDirs.length;
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     setUploading(true);
+    setUploadProgress({ done: 0, total, current: '' });
+
+    let done = 0;
+    let succeeded = 0;
+    let failed = 0;
+    let lastUploadedName = '';
+    let firstError = '';
+
+    const bumpProgress = (current: string) => {
+      done += 1;
+      setUploadProgress({ done, total, current });
+    };
+
     try {
-      const res = await api.browseUpload(remote, subpath, file);
-      onToast(`Uploaded "${res.name}"`);
-      void loadDir(remote, subpath);
-    } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Upload failed', true);
+      for (const dir of emptyDirs) {
+        if (controller.signal.aborted) break;
+        try {
+          await api.browseMkdir(remote, dir);
+          succeeded += 1;
+          lastUploadedName = dir;
+        } catch (err) {
+          failed += 1;
+          if (!firstError) {
+            firstError = err instanceof Error ? err.message : 'Folder creation failed';
+          }
+        }
+        bumpProgress(dir);
+      }
+
+      const UPLOAD_CONCURRENCY = 3;
+      let nextIdx = 0;
+      const workers = Array.from(
+        { length: Math.min(UPLOAD_CONCURRENCY, queue.length) },
+        async () => {
+          while (!controller.signal.aborted) {
+            const idx = nextIdx;
+            nextIdx += 1;
+            if (idx >= queue.length) return;
+            const item = queue[idx];
+            setUploadProgress((prev) => (prev ? { ...prev, current: item.displayPath } : prev));
+            try {
+              const res = await api.browseUpload(
+                remote,
+                item.dirPath,
+                item.file,
+                controller.signal
+              );
+              succeeded += 1;
+              lastUploadedName = res.name;
+            } catch (err) {
+              if (err instanceof DOMException && err.name === 'AbortError') {
+                return;
+              }
+              failed += 1;
+              if (!firstError) {
+                firstError = err instanceof Error ? err.message : 'Upload failed';
+              }
+            }
+            bumpProgress(item.displayPath);
+          }
+        }
+      );
+      await Promise.all(workers);
+
+      if (controller.signal.aborted) {
+        onToast(`Upload cancelled (${succeeded} uploaded)`, failed > 0);
+      } else if (failed > 0) {
+        onToast(
+          `Uploaded ${succeeded}/${total} item(s); ${failed} failed${firstError ? ` (${firstError})` : ''}`,
+          true
+        );
+      } else if (total === 1) {
+        onToast(`Uploaded "${lastUploadedName}"`);
+      } else {
+        onToast(`Uploaded ${succeeded} item(s)`);
+      }
+      if (succeeded > 0) {
+        void loadDir(remote, subpath);
+      }
     } finally {
+      uploadAbortRef.current = null;
       setUploading(false);
+      setUploadProgress(null);
+    }
+  };
+
+  const handleUploadInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files = input.files;
+    if (!files || files.length === 0 || !remote) {
       input.value = '';
+      return;
+    }
+    const queue = buildUploadQueueFromFileList(files, subpath);
+    input.value = '';
+    await runUploadQueue(queue);
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!remote || uploading) return;
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragging(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!remote || uploading) return;
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!remote) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    if (!remote || uploading) return;
+    try {
+      const { files, emptyDirs } = await collectDroppedEntries(e.dataTransfer, subpath);
+      if (files.length === 0 && emptyDirs.length === 0) {
+        return;
+      }
+      await runUploadQueue(files, emptyDirs);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to read dropped files', true);
     }
   };
 
@@ -385,12 +530,31 @@ export function BrowsePage({
             ) : (
               <Upload className="w-3.5 h-3.5" />
             )}
-            <span>Upload</span>
+            <span>Upload Files</span>
             <input
               type="file"
-              aria-label="Upload file to current folder"
+              multiple
+              aria-label="Upload files to current folder"
               disabled={uploading || !remote}
-              onChange={(e) => void handleUploadFile(e)}
+              onChange={(e) => void handleUploadInput(e)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+          </div>
+
+          <div
+            className={`relative overflow-hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 ${
+              uploading || !remote ? 'opacity-50 pointer-events-none' : 'cursor-pointer'
+            }`}
+          >
+            <FolderUp className="w-3.5 h-3.5" />
+            <span>Upload Folder</span>
+            <input
+              type="file"
+              multiple
+              webkitdirectory=""
+              aria-label="Upload folder to current folder"
+              disabled={uploading || !remote}
+              onChange={(e) => void handleUploadInput(e)}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             />
           </div>
@@ -518,7 +682,59 @@ export function BrowsePage({
         </div>
       )}
 
-      <div className="rounded-2xl bg-slate-900/90 border border-slate-800 divide-y divide-slate-800/70 overflow-hidden">
+      {uploadProgress && (
+        <div className="p-3 rounded-xl bg-slate-900/90 border border-sky-500/30 space-y-2">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0 text-sky-200">
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-sky-400" />
+              <span className="font-medium shrink-0 tabular-nums">
+                Uploading {uploadProgress.done}/{uploadProgress.total}
+              </span>
+              {uploadProgress.current && (
+                <span className="text-slate-400 font-mono truncate">
+                  · {uploadProgress.current}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => uploadAbortRef.current?.abort()}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 shrink-0"
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-sky-400 transition-all duration-150"
+              style={{
+                width: `${uploadProgress.total > 0 ? Math.round((uploadProgress.done / uploadProgress.total) * 100) : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => void handleDrop(e)}
+        className={`relative rounded-2xl bg-slate-900/90 border divide-y divide-slate-800/70 overflow-hidden transition-colors ${
+          isDragging && remote ? 'border-sky-400 ring-2 ring-sky-500/30' : 'border-slate-800'
+        }`}
+      >
+        {isDragging && remote && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-slate-950/80 backdrop-blur-[1px] pointer-events-none">
+            <FolderUp className="w-8 h-8 text-sky-400" />
+            <div className="text-sm font-medium text-sky-200">
+              Drop files or folders here to upload
+            </div>
+            <div className="text-xs font-mono text-slate-400">
+              Destination: {remote}:{subpath}
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-slate-400 gap-2">
             <Loader2 className="w-4 h-4 animate-spin" />

@@ -1,6 +1,12 @@
 package rclone
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestCleanSubpathAndFormatRemoteTarget(t *testing.T) {
 	valid := []struct {
@@ -75,5 +81,32 @@ func TestBuildVersionCandidates(t *testing.T) {
 	}
 	if gotRoot[0].BackupRoot != "archive/vers" || gotRoot[1].BackupRoot != "_versions" {
 		t.Fatalf("unexpected candidate ordering: %+v", gotRoot)
+	}
+}
+
+func TestUploadFileNestedSubpath(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := filepath.Join(dir, "remote-root")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	confPath := filepath.Join(dir, "rclone.conf")
+	client := NewClient("rclone", confPath)
+	ctx := context.Background()
+
+	if err := client.CreateRemote(ctx, "testrem", "alias", map[string]string{"remote": rootDir}); err != nil {
+		t.Fatalf("CreateRemote: %v", err)
+	}
+
+	if err := client.UploadFile(ctx, "testrem", "folder-a/sub-b/hello.txt", strings.NewReader("nested-ok")); err != nil {
+		t.Fatalf("UploadFile nested subpath failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(rootDir, "folder-a", "sub-b", "hello.txt"))
+	if err != nil {
+		t.Fatalf("read uploaded file: %v", err)
+	}
+	if string(got) != "nested-ok" {
+		t.Fatalf("uploaded content = %q, want %q", string(got), "nested-ok")
 	}
 }

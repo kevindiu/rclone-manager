@@ -304,14 +304,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ remote, path }),
     }),
-  browseUpload: (remote: string, dirPath: string, file: File) => {
+  browseUpload: (remote: string, dirPath: string, file: File, signal?: AbortSignal) => {
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', file, file.name);
     return request<{ status: string; path: string; name: string }>(
       `/api/browse/upload?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(dirPath)}`,
       {
         method: 'POST',
         body: fd,
+        signal,
       }
     );
   },
