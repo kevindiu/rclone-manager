@@ -228,10 +228,11 @@ func (n *Notifier) sendFormatted(ctx context.Context, settings domain.GlobalSett
 	case "ntfy":
 		priority := "default"
 		tags := "bell"
-		if status == "failed" {
+		switch status {
+		case "failed":
 			priority = "high"
 			tags = "rotating_light"
-		} else if status == "success" {
+		case "success":
 			tags = "white_check_mark"
 		}
 		return n.doRequest(ctx, settings.WebhookURL, "text/plain; charset=utf-8", []byte(message), map[string]string{
