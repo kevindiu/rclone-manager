@@ -4,13 +4,13 @@ A lightweight, self-hosted web UI for managing `rclone` remotes, scheduled backu
 
 ## Features
 
-- **Cloud & Encrypted Remotes**: Set up, edit, test, and delete S3, R2, B2, Google Drive, OneDrive, Dropbox, SFTP, WebDAV, and `crypt` encrypted remotes, or import an existing `rclone.conf`.
-- **Scheduled Backup & Sync Jobs**: Create `copy` and `sync` jobs with cron schedules, bandwidth limits, include/exclude filters, dry-run testing, and safety guards (abort on empty source, required marker file, max delete limit).
+- **Cloud & Encrypted Remotes**: Set up, edit, test, deduplicate, clean up, and delete S3, R2, B2, Google Drive, OneDrive, Dropbox, SFTP, WebDAV, and `crypt` encrypted remotes (including an Encrypted Remote Wizard), or import an existing `rclone.conf`.
+- **Scheduled Backup & Sync Jobs**: Create `copy`, `sync`, `move`, `check`, and `bisync` jobs with cron schedules, bandwidth limits, include/exclude/age/size filters, command preview, dry-run testing, and safety guards (abort on empty source, required marker file, max delete limit).
 - **Incremental Versioning**: Archive overwritten or deleted files into dated version folders (`_versions/YYYY-MM-DD`) with configurable retention cleanup.
-- **File Browser & Quick Restore**: Browse remote files (including decrypted `crypt` remotes), inspect per-file version history, download files, or restore files/folders with overwrite, skip, or newer-only conflict handling.
-- **Live Progress & History**: Watch real-time transfer speed, ETA, and per-file progress, and review searchable run logs.
-- **Backup & Migration**: Export or import settings and jobs in JSON or YAML format.
-- **Mandatory Login**: Password-protected access out of the box.
+- **File Browser & Quick Restore**: Browse remote files (including decrypted `crypt` remotes), preview images/PDFs/text inline, inspect per-file version history, upload/rename/bulk-delete, download files, or restore files/folders with overwrite, skip, or newer-only conflict handling.
+- **Live Progress, Stats & Notifications**: Watch real-time transfer speed, ETA, per-file progress, and 14-day activity charts, review searchable run logs, and receive completion alerts via Webhook (Discord/Slack/JSON), Telegram Bot, or Ntfy.
+- **Backup & Migration**: Export or import settings and jobs in JSON/YAML, or create passphrase-encrypted full `.rcmbak` backups including `rclone.conf` (PBKDF2-SHA256 + AES-256-GCM).
+- **Mandatory Login & Session Control**: Password-protected access out of the box with active session tracking and remote session revocation.
 - **Mobile-Friendly PWA**: Installable web interface for desktop and mobile browsers.
 
 ## Quick Start (Docker Compose)
@@ -63,6 +63,7 @@ Open `http://localhost:8080` in your browser.
 | `RCLONE_MANAGER_ADMIN_PASSWORD` | `""` | Optional initial admin password (min 8 chars) |
 | `RCLONE_MANAGER_SESSION_TTL` | `168h` | Login session lifetime (minimum `5m`) |
 | `RCLONE_MANAGER_CORS_ORIGINS` | `""` | Allowed CORS origins (comma-separated; empty = same-origin only) |
+| `RCLONE_MANAGER_TRUSTED_PROXIES` | `""` | Comma-separated reverse proxy IPs/CIDRs trusted for `X-Forwarded-For` / `X-Forwarded-Proto` |
 | `RCLONE_MANAGER_LOG_LEVEL` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
 
 Transfer defaults (`transfers`, `checkers`, bandwidth limit, retries, timeouts, max concurrent jobs, and log retention) are configured directly in **Settings** inside the web UI.

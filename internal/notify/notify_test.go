@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -193,5 +195,49 @@ func TestNotifyProvidersAndOverrides(t *testing.T) {
 	var tg map[string]string
 	if err := json.Unmarshal([]byte(gotBody), &tg); err != nil || tg["chat_id"] != "-100123456" || tg["text"] == "" {
 		t.Fatalf("unexpected telegram payload: %q err=%v", gotBody, err)
+	}
+}
+
+func TestDoRequestSanitizesURLErrorSecrets(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	n := NewNotifier(logger)
+	n.client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, &url.Error{
+				Op:  "Post",
+				URL: req.URL.String(),
+				Err: errors.New("dial tcp: lookup api.telegram.org: no such host"),
+			}
+		}),
+	}
+
+	settings := domain.GlobalSettings{
+		WebhookType:      "telegram",
+		WebhookOn:        "always",
+		TelegramBotToken: "123456:TOPSECRET",
+		TelegramChatID:   "-100123",
+	}
+
+	err := n.SendTestSettings(context.Background(), settings)
+	if err == nil {
+		t.Fatal("expected error from SendTestSettings")
+	}
+	if strings.Contains(err.Error(), "TOPSECRET") {
+		t.Fatalf("SendTestSettings leaked bot token in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "lookup api.telegram.org") {
+		t.Fatalf("expected underlying error preserved, got: %v", err)
+	}
+
+	n.NotifyRun(context.Background(), settings, domain.JobRun{
+		ID:      "r-secret",
+		JobID:   "j-1",
+		JobName: "Secret Check",
+		Status:  "failed",
+		Trigger: "manual",
+	})
+	if strings.Contains(logBuf.String(), "TOPSECRET") {
+		t.Fatalf("NotifyRun leaked bot token in log output: %s", logBuf.String())
 	}
 }

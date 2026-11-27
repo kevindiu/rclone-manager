@@ -17,9 +17,10 @@ import (
 )
 
 type mockStore struct {
-	settings domain.GlobalSettings
-	jobs     map[string]domain.Job
-	runs     map[string]domain.JobRun
+	settings  domain.GlobalSettings
+	jobs      map[string]domain.Job
+	runs      map[string]domain.JobRun
+	importErr error
 }
 
 func newMockStore() *mockStore {
@@ -76,6 +77,9 @@ func (m *mockStore) DeleteJob(_ context.Context, id string) error {
 	return nil
 }
 func (m *mockStore) ImportBundle(_ context.Context, bundle domain.ExportBundle, _ string, _ domain.GlobalSettings) error {
+	if m.importErr != nil {
+		return m.importErr
+	}
 	m.settings = bundle.Settings
 	for _, j := range bundle.Jobs {
 		m.jobs[j.ID] = j
@@ -190,12 +194,20 @@ func (m *mockBrowser) ImportConf(_ context.Context, content, mode string) ([]str
 	if m.importErr != nil {
 		return nil, m.importErr
 	}
+	m.rawConf = content
 	m.importedConf = content
 	m.importedMode = mode
 	if len(m.importRemotes) > 0 {
 		return m.importRemotes, nil
 	}
 	return []string{"b2"}, nil
+}
+
+func (m *mockBrowser) ClearConf(_ context.Context) error {
+	m.rawConf = ""
+	m.importedConf = ""
+	m.importedMode = "cleared"
+	return nil
 }
 
 func (m *mockBrowser) ListVersions(_ context.Context, _, _ string, extra []rclone.VersionRootCandidate) ([]rclone.FileVersion, error) {
@@ -275,6 +287,22 @@ func TestUpdateSettingsAndImportBundleValidation(t *testing.T) {
 	preserved, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookType: "telegram", TelegramBotToken: rclone.MaskedSecret, TelegramChatID: "-100999"})
 	if err != nil || preserved.TelegramBotToken != "999:SECRET" {
 		t.Fatalf("expected masked TelegramBotToken preserved, got %+v err=%v", preserved, err)
+	}
+
+	// Plaintext ExportBundle must mask TelegramBotToken, and ImportBundle must preserve stored secret when given MaskedSecret.
+	exported, err := svc.ExportBundle(ctx)
+	if err != nil {
+		t.Fatalf("ExportBundle failed: %v", err)
+	}
+	if exported.Settings.TelegramBotToken != rclone.MaskedSecret {
+		t.Fatalf("expected ExportBundle to mask TelegramBotToken, got %q", exported.Settings.TelegramBotToken)
+	}
+	if err := svc.ImportBundle(ctx, exported, "merge"); err != nil {
+		t.Fatalf("ImportBundle with masked token failed: %v", err)
+	}
+	afterImport, err := svc.GetSettings(ctx)
+	if err != nil || afterImport.TelegramBotToken != "999:SECRET" {
+		t.Fatalf("expected ImportBundle to preserve stored TelegramBotToken, got %+v err=%v", afterImport, err)
 	}
 }
 
@@ -419,6 +447,13 @@ func TestValidateJobAndJobsLifecycle(t *testing.T) {
 		{Name: "BadCron", Source: "/a", Destination: "/b", Schedule: "bad cron"},
 		{Name: "BadCutoff", Source: "/a", Destination: "/b", CutoffMode: "instant"},
 		{Name: "BadFlag", Source: "/a", Destination: "/b", CustomFlags: "--rc"},
+		{Name: "BadDryRunFlag", Source: "/a", Destination: "/b", CustomFlags: "--dry-run=false"},
+		{Name: "BadLine\nName", Source: "/a", Destination: "/b"},
+		{Name: "HyphenSrc", Source: "--dry-run=false", Destination: "/b"},
+		{Name: "HyphenDst", Source: "/a", Destination: "-n"},
+		{Name: "HyphenBackup", Source: "/a", Destination: "/b", BackupDirBase: "-rf"},
+		{Name: "BadVerFormatSlash", Source: "/a", Destination: "/b", VersionFormat: "2006/01"},
+		{Name: "BadVerFormatDots", Source: "/a", Destination: "/b", VersionFormat: "../escape"},
 	}
 	for _, bj := range badJobs {
 		if _, err := svc.CreateJob(ctx, bj); !errors.Is(err, ErrValidation) {

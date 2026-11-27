@@ -216,15 +216,32 @@ func ValidateJob(job *domain.Job) error {
 	job.Source = strings.TrimSpace(job.Source)
 	job.Destination = strings.TrimSpace(job.Destination)
 	job.Schedule = strings.TrimSpace(job.Schedule)
+	job.BackupDirBase = strings.TrimSpace(job.BackupDirBase)
+	job.VersionFormat = strings.TrimSpace(job.VersionFormat)
 
 	if job.Name == "" {
 		return errors.New("job name is required")
 	}
+	if strings.ContainsAny(job.Name, "\r\n\x00") {
+		return errors.New("job name cannot contain control or newline characters")
+	}
 	if job.Source == "" {
 		return errors.New("source path is required")
 	}
+	if strings.HasPrefix(job.Source, "-") {
+		return errors.New("source path cannot start with '-'")
+	}
 	if job.Destination == "" {
 		return errors.New("destination path is required")
+	}
+	if strings.HasPrefix(job.Destination, "-") {
+		return errors.New("destination path cannot start with '-'")
+	}
+	if strings.HasPrefix(job.BackupDirBase, "-") {
+		return errors.New("backup_dir_base cannot start with '-'")
+	}
+	if job.VersionFormat != "" && (strings.ContainsAny(job.VersionFormat, "/\\\r\n\x00") || strings.Contains(job.VersionFormat, "..")) {
+		return errors.New("version_format must be a single folder name layout without path separators")
 	}
 	if job.Operation == "" {
 		job.Operation = "sync"

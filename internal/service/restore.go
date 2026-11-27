@@ -26,6 +26,9 @@ func (s *AppService) StartRestore(ctx context.Context, req rclone.RestoreRequest
 	if target == "" {
 		return nil, fmt.Errorf("%w: target_path is required", ErrValidation)
 	}
+	if strings.HasPrefix(target, "-") {
+		return nil, fmt.Errorf("%w: target_path cannot start with '-'", ErrValidation)
+	}
 
 	var customFlags string
 	switch strings.TrimSpace(req.ConflictMode) {

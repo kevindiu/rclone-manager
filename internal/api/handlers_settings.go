@@ -93,6 +93,7 @@ func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="rclone-manager-backup.yaml"`)
+		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 		return
@@ -105,6 +106,7 @@ func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="rclone-manager-backup.json"`)
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }

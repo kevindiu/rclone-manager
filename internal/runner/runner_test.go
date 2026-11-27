@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -314,5 +316,106 @@ func TestRunnerStopQueuedJobCancelsCleanly(t *testing.T) {
 	r.Wait()
 	if _, active := r.ActiveRunByJob(job.ID); active {
 		t.Fatal("expected job removed from active map after completion")
+	}
+}
+
+type mockNotifier struct {
+	mu    sync.Mutex
+	calls []domain.JobRun
+	done  chan struct{}
+}
+
+func (m *mockNotifier) NotifyRun(_ context.Context, _ domain.GlobalSettings, run domain.JobRun) {
+	m.mu.Lock()
+	m.calls = append(m.calls, run)
+	m.mu.Unlock()
+	if m.done != nil {
+		select {
+		case m.done <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func TestRunnerTelegramNotificationAndSkippedAndShutdown(t *testing.T) {
+	ctx := context.Background()
+	r, store, dir := setupTestRunner(t)
+
+	if err := store.SaveSettings(ctx, domain.GlobalSettings{
+		Transfers:         2,
+		Checkers:          4,
+		Timezone:          "UTC",
+		MaxConcurrentJobs: 2,
+		WebhookType:       "telegram",
+		WebhookOn:         "always",
+		TelegramBotToken:  "123456:BOTSECRET",
+		TelegramChatID:    "-100123",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	notif := &mockNotifier{done: make(chan struct{}, 4)}
+	r.SetNotifier(notif)
+
+	src := filepath.Join(dir, "tgsrc")
+	dst := filepath.Join(dir, "tgdst")
+	_ = os.MkdirAll(src, 0o755)
+	_ = os.MkdirAll(dst, 0o755)
+	_ = os.WriteFile(filepath.Join(src, "f.txt"), []byte("hi"), 0o644)
+
+	job, err := store.CreateJob(ctx, domain.Job{
+		Name:        "Telegram Job",
+		Enabled:     true,
+		Operation:   "copy",
+		Source:      src,
+		Destination: dst,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an active run to trigger a skipped scheduled run notification.
+	r.mu.Lock()
+	r.active[job.ID] = &activeRun{snapshot: domain.ActiveRunSnapshot{RunID: "busy", JobID: job.ID}}
+	r.mu.Unlock()
+	if _, err := r.StartJob(*job, "schedule", false); !errors.Is(err, ErrJobAlreadyRunning) {
+		t.Fatalf("expected ErrJobAlreadyRunning, got %v", err)
+	}
+	r.mu.Lock()
+	delete(r.active, job.ID)
+	r.mu.Unlock()
+
+	select {
+	case <-notif.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for skipped run notification")
+	}
+
+	// Now run normally and verify Telegram notification fires even with empty WebhookURL.
+	run, err := r.StartJob(*job, "manual", false)
+	if err != nil {
+		t.Fatalf("StartJob failed: %v", err)
+	}
+	res := waitForRunDone(t, store, run.ID)
+	if res.Status != "success" {
+		t.Fatalf("expected success, got %+v", res)
+	}
+
+	select {
+	case <-notif.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for telegram notification on finished run")
+	}
+
+	r.Shutdown()
+	notif.mu.Lock()
+	count := len(notif.calls)
+	notif.mu.Unlock()
+	if count != 2 {
+		t.Fatalf("expected 2 notifications (skipped + success), got %d", count)
+	}
+
+	if _, err := r.StartJob(*job, "manual", false); !errors.Is(err, ErrShuttingDown) {
+		t.Fatalf("expected ErrShuttingDown after Shutdown, got %v", err)
 	}
 }

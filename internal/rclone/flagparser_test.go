@@ -69,7 +69,7 @@ func TestParseFlags(t *testing.T) {
 }
 
 func TestValidateCustomFlags(t *testing.T) {
-	if _, err := ParseAndValidateFlags(`--fast-list --transfers 8`); err != nil {
+	if _, err := ParseAndValidateFlags(`--fast-list --transfers 8 --filter "- *.tmp"`); err != nil {
 		t.Fatalf("unexpected error for valid flags: %v", err)
 	}
 	for _, bad := range []string{
@@ -78,6 +78,14 @@ func TestValidateCustomFlags(t *testing.T) {
 		`--use-json-log`,
 		`--rc-addr=0.0.0.0:5572`,
 		`--log-file /tmp/foo`,
+		`--dry-run=false`,
+		`-n`,
+		`-nv`,
+		`--password-command "id"`,
+		`--dump=headers`,
+		`--dump-bodies`,
+		`--backup-dir=/tmp/evil`,
+		`--ask-password`,
 	} {
 		if _, err := ParseAndValidateFlags(bad); err == nil {
 			t.Fatalf("expected error for blocked flag %q", bad)

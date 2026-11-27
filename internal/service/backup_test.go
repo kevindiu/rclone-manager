@@ -117,3 +117,38 @@ func TestAppServiceImportEncryptedBackupSkipsEmptyRcloneConf(t *testing.T) {
 		t.Fatalf("expected 0 remotes imported, got %+v", res)
 	}
 }
+
+func TestAppServiceImportEncryptedBackupRollbackAndReplaceEmptyConf(t *testing.T) {
+	svc, st, _, _, _, br := newTestService()
+	ctx := context.Background()
+
+	// Replace mode with empty rclone_conf clears existing rclone.conf.
+	br.rawConf = ""
+	emptyConfBackup, err := svc.ExportEncryptedBackup(ctx, "StrongBackupPass!1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.rawConf = "[oldremote]\ntype = local\n"
+	if _, err := svc.ImportEncryptedBackup(ctx, emptyConfBackup, "StrongBackupPass!1", "replace"); err != nil {
+		t.Fatalf("ImportEncryptedBackup replace empty conf failed: %v", err)
+	}
+	if br.rawConf != "" || br.importedMode != "cleared" {
+		t.Fatalf("expected existing rclone.conf cleared in replace mode, got conf=%q mode=%q", br.rawConf, br.importedMode)
+	}
+
+	// If ImportBundle fails after rclone.conf was updated, rclone.conf must be rolled back.
+	br.rawConf = "[newremote]\ntype = local\n"
+	backupWithRemote, err := svc.ExportEncryptedBackup(ctx, "StrongBackupPass!1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevConf := "[original]\ntype = local\n"
+	br.rawConf = prevConf
+	st.importErr = errors.New("simulated DB failure")
+	if _, err := svc.ImportEncryptedBackup(ctx, backupWithRemote, "StrongBackupPass!1", "replace"); err == nil {
+		t.Fatal("expected ImportEncryptedBackup error on DB failure")
+	}
+	if br.rawConf != prevConf {
+		t.Fatalf("expected rclone.conf rolled back to %q, got %q", prevConf, br.rawConf)
+	}
+}

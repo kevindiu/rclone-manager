@@ -1,5 +1,7 @@
 import { X } from 'lucide-react';
-import { type ReactNode, useEffect, useId } from 'react';
+import { type ReactNode, useEffect, useId, useRef } from 'react';
+
+const escapeStack: symbol[] = [];
 
 export function Modal({
   title,
@@ -17,14 +19,26 @@ export function Modal({
   footer?: ReactNode;
 }) {
   const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
+    const id = Symbol();
+    escapeStack.push(id);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && escapeStack[escapeStack.length - 1] === id) {
+        onCloseRef.current();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      const idx = escapeStack.lastIndexOf(id);
+      if (idx !== -1) {
+        escapeStack.splice(idx, 1);
+      }
+    };
+  }, []);
 
   return (
     <div

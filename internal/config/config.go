@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,8 +27,9 @@ type Config struct {
 	RcloneBin     string
 	LogLevel      string
 	LogFormat     string
-	CORSOrigins   []string
-	AdminUser     string
+	CORSOrigins    []string
+	TrustedProxies []netip.Prefix
+	AdminUser      string
 	AdminPassword string
 	SessionTTL    time.Duration
 	Defaults      domain.GlobalSettings
@@ -60,6 +62,8 @@ func Load() (*Config, error) {
 		}
 	}
 
+	trustedProxies := parseTrustedProxies(getEnv("RCLONE_MANAGER_TRUSTED_PROXIES", ""))
+
 	adminUser := strings.TrimSpace(getEnv("RCLONE_MANAGER_ADMIN_USER", ""))
 	adminPassword := getEnv("RCLONE_MANAGER_ADMIN_PASSWORD", "")
 	sessionTTL := getEnvDuration("RCLONE_MANAGER_SESSION_TTL", defaultSessionTTL)
@@ -77,8 +81,9 @@ func Load() (*Config, error) {
 		RcloneBin:     rcloneBin,
 		LogLevel:      logLevel,
 		LogFormat:     logFormat,
-		CORSOrigins:   corsOrigins,
-		AdminUser:     adminUser,
+		CORSOrigins:    corsOrigins,
+		TrustedProxies: trustedProxies,
+		AdminUser:      adminUser,
 		AdminPassword: adminPassword,
 		SessionTTL:    sessionTTL,
 		Defaults: domain.GlobalSettings{
@@ -161,4 +166,23 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func parseTrustedProxies(raw string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(p); err == nil {
+			out = append(out, netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()))
+			continue
+		}
+		if addr, err := netip.ParseAddr(p); err == nil {
+			unmapped := addr.Unmap()
+			out = append(out, netip.PrefixFrom(unmapped, unmapped.BitLen()))
+		}
+	}
+	return out
 }

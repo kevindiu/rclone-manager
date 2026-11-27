@@ -187,7 +187,9 @@ ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data, update
 }
 
 func normalizeJobDefaults(job *domain.Job) {
-	if job.Operation != "copy" && job.Operation != "sync" {
+	switch job.Operation {
+	case "copy", "sync", "move", "check", "bisync":
+	default:
 		job.Operation = "sync"
 	}
 	if job.CutoffMode == "" && job.MaxTransfer != "" {

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,16 @@ import (
 
 // BuildRcloneArgs constructs the complete argument list for an rclone job execution.
 func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath string, dryRun bool, nowLocal time.Time) (args []string, backupBase string, datedBackupDir string, err error) {
+	if strings.HasPrefix(strings.TrimSpace(job.Source), "-") {
+		return nil, "", "", errors.New("source path cannot start with '-'")
+	}
+	if strings.HasPrefix(strings.TrimSpace(job.Destination), "-") {
+		return nil, "", "", errors.New("destination path cannot start with '-'")
+	}
+	if strings.HasPrefix(strings.TrimSpace(job.BackupDirBase), "-") {
+		return nil, "", "", errors.New("backup_dir_base cannot start with '-'")
+	}
+
 	op := job.Operation
 	switch op {
 	case "copy", "sync", "move", "check", "bisync", "copyto":

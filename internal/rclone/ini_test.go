@@ -132,3 +132,16 @@ remote = /tmp/alias
 		t.Fatalf("corrupt file was unexpectedly overwritten: %q", string(afterCorrupt))
 	}
 }
+
+func TestParseINIRejectsDuplicateSections(t *testing.T) {
+	dup := `[myremote]
+type = local
+
+[myremote]
+type = alias
+remote = /tmp
+`
+	if _, err := ParseINI(dup); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("expected duplicate section error, got %v", err)
+	}
+}

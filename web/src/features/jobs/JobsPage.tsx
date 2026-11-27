@@ -163,7 +163,7 @@ export function JobsPage({
                       )}
                       {(job.abort_if_source_empty ||
                         job.required_marker_file ||
-                        job.max_delete !== null) && (
+                        job.max_delete != null) && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber-500/10 text-amber-300 border border-amber-500/30">
                           <ShieldCheck className="w-3 h-3" />
                           Guarded

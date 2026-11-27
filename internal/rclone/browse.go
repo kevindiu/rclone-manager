@@ -185,6 +185,10 @@ func (c *Client) StatFile(ctx context.Context, remote, subpath string) (*BrowseE
 	if err := c.ensureRemoteExists(ctx, remote); err != nil {
 		return nil, err
 	}
+	return c.statFileUnchecked(ctx, remote, subpath)
+}
+
+func (c *Client) statFileUnchecked(ctx context.Context, remote, subpath string) (*BrowseEntry, error) {
 	target, err := FormatRemoteTarget(remote, subpath)
 	if err != nil {
 		return nil, err
@@ -306,11 +310,44 @@ func (c *Client) RenamePath(ctx context.Context, remote, srcSubpath, dstSubpath 
 	return nil
 }
 
+// BulkDeleteEntry describes a file or folder path to remove in a batch delete call.
+type BulkDeleteEntry struct {
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
+}
+
+// BulkDeleteFailure reports an entry that failed during BulkDeletePaths.
+type BulkDeleteFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
 // DeletePath deletes a single file (`deletefile`) or recursive directory (`purge`) on remote.
 func (c *Client) DeletePath(ctx context.Context, remote, subpath string, isDir bool) error {
 	if err := c.ensureRemoteExists(ctx, remote); err != nil {
 		return err
 	}
+	return c.deletePathUnchecked(ctx, remote, subpath, isDir)
+}
+
+// BulkDeletePaths verifies the remote once and deletes each requested entry.
+func (c *Client) BulkDeletePaths(ctx context.Context, remote string, entries []BulkDeleteEntry) (int, []BulkDeleteFailure, error) {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return 0, nil, err
+	}
+	deleted := 0
+	failed := make([]BulkDeleteFailure, 0)
+	for _, entry := range entries {
+		if err := c.deletePathUnchecked(ctx, remote, entry.Path, entry.IsDir); err != nil {
+			failed = append(failed, BulkDeleteFailure{Path: entry.Path, Error: err.Error()})
+		} else {
+			deleted++
+		}
+	}
+	return deleted, failed, nil
+}
+
+func (c *Client) deletePathUnchecked(ctx context.Context, remote, subpath string, isDir bool) error {
 	cleanSub, err := CleanSubpath(subpath)
 	if err != nil {
 		return err
@@ -467,7 +504,7 @@ func (c *Client) ListVersions(ctx context.Context, remote, subpath string, extra
 					return
 				}
 
-				stat, err := c.StatFile(ctx, remote, versionSub)
+				stat, err := c.statFileUnchecked(ctx, remote, versionSub)
 				if err != nil || stat == nil {
 					return
 				}

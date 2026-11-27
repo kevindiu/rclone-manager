@@ -146,7 +146,6 @@ func main() {
 	logger.Info("shutting down rclone-manager")
 
 	sched.Stop()
-	runEngine.Shutdown()
 	hub.Close()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -154,6 +153,7 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("http shutdown warning", "error", err)
 	}
+	runEngine.Shutdown()
 	logger.Info("shutdown complete")
 }
 

@@ -2,7 +2,6 @@ package runner
 
 import (
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -159,14 +158,31 @@ func TestBuildRcloneArgsVersioningSelfExclusion(t *testing.T) {
 }
 
 func TestBuildRcloneArgsRejectsManagedCustomFlags(t *testing.T) {
-	_, _, _, err := BuildRcloneArgs(domain.Job{
-		Operation:   "copy",
-		Source:      "/src",
-		Destination: "/dst",
-		CustomFlags: "--config /etc/evil.conf",
-	}, domain.GlobalSettings{}, "/cfg/rclone.conf", false, time.Now())
-	if err == nil || !strings.Contains(err.Error(), "--config") {
-		t.Fatalf("expected managed --config rejection error, got %v", err)
+	for _, badFlag := range []string{
+		"--config /etc/evil.conf",
+		"--dry-run=false",
+		"-nv",
+		"--password-command=id",
+	} {
+		_, _, _, err := BuildRcloneArgs(domain.Job{
+			Operation:   "copy",
+			Source:      "/src",
+			Destination: "/dst",
+			CustomFlags: badFlag,
+		}, domain.GlobalSettings{}, "/cfg/rclone.conf", true, time.Now())
+		if err == nil {
+			t.Fatalf("expected managed flag rejection for %q", badFlag)
+		}
+	}
+
+	for _, badJob := range []domain.Job{
+		{Operation: "copy", Source: "--dry-run=false", Destination: "/dst"},
+		{Operation: "copy", Source: "/src", Destination: "--log-file=/tmp/x"},
+		{Operation: "copy", Source: "/src", Destination: "/dst", BackupDirBase: "-rf"},
+	} {
+		if _, _, _, err := BuildRcloneArgs(badJob, domain.GlobalSettings{}, "/cfg/rclone.conf", true, time.Now()); err == nil {
+			t.Fatalf("expected hyphen-prefixed path rejection for %+v", badJob)
+		}
 	}
 }
 

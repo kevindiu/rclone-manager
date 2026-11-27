@@ -221,6 +221,7 @@ func (c *Client) DeleteRemote(ctx context.Context, name string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("rclone config delete failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
+	_ = os.Chmod(c.confPath, 0o600)
 	return nil
 }
 
@@ -229,6 +230,19 @@ func (c *Client) ImportConf(ctx context.Context, content, mode string) ([]string
 	c.confMu.Lock()
 	defer c.confMu.Unlock()
 	return MergeOrValidateINI(ctx, c.bin, c.confPath, content, mode)
+}
+
+// ClearConf removes rclone.conf if it exists (used when replacing with an empty backup).
+func (c *Client) ClearConf(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.confMu.Lock()
+	defer c.confMu.Unlock()
+	if err := os.Remove(c.confPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // ReadRawConf returns the raw rclone.conf INI contents, or empty string if the file does not exist yet.
@@ -304,9 +318,18 @@ func (c *Client) TestRemoteConfig(ctx context.Context, name, remoteType string, 
 	if err != nil {
 		return RemoteTestResult{}, err
 	}
-	if _, exists := existing[testName]; exists {
-		if err := tmpClient.UpdateRemote(ctx, testName, params); err != nil {
-			return RemoteTestResult{}, err
+	if cur, exists := existing[testName]; exists {
+		if cur["type"] == remoteType {
+			if err := tmpClient.UpdateRemote(ctx, testName, params); err != nil {
+				return RemoteTestResult{}, err
+			}
+		} else {
+			if err := tmpClient.DeleteRemote(ctx, testName); err != nil {
+				return RemoteTestResult{}, err
+			}
+			if err := tmpClient.CreateRemote(ctx, testName, remoteType, params); err != nil {
+				return RemoteTestResult{}, err
+			}
 		}
 	} else {
 		if err := tmpClient.CreateRemote(ctx, testName, remoteType, params); err != nil {

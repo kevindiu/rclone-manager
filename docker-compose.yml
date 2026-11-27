@@ -24,6 +24,8 @@ services:
       # RCLONE_MANAGER_SESSION_TTL: "168h"
       # Optional comma-separated allowed CORS origins (leave empty for same-origin only)
       # RCLONE_MANAGER_CORS_ORIGINS: "https://backup.example.com"
+      # Optional comma-separated reverse proxy IPs/CIDRs trusted for X-Forwarded-For / X-Forwarded-Proto
+      # RCLONE_MANAGER_TRUSTED_PROXIES: "127.0.0.1,172.16.0.0/12"
     volumes:
       - ./config:/config
       # Mount any local directories you want to back up:

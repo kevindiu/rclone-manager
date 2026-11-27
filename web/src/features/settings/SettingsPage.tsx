@@ -15,13 +15,33 @@ import {
   SlidersHorizontal,
   Upload,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import type { AuthUser, GlobalSettings, SessionInfo, SystemInfo } from '../../types/api';
 import { COMMON_TIMEZONES, formatDateTime } from '../../utils/format';
 
 type SettingsTab = 'general' | 'notifications' | 'security' | 'backup';
+
+function settingsEqual(a: GlobalSettings, b: GlobalSettings): boolean {
+  return (
+    a.transfers === b.transfers &&
+    a.checkers === b.checkers &&
+    a.bwlimit === b.bwlimit &&
+    a.retries === b.retries &&
+    a.low_level_retries === b.low_level_retries &&
+    a.timeout === b.timeout &&
+    a.contimeout === b.contimeout &&
+    a.log_retention_days === b.log_retention_days &&
+    a.timezone === b.timezone &&
+    a.max_concurrent_jobs === b.max_concurrent_jobs &&
+    (a.webhook_url ?? '') === (b.webhook_url ?? '') &&
+    (a.webhook_on || 'failure') === (b.webhook_on || 'failure') &&
+    (a.webhook_type || 'generic') === (b.webhook_type || 'generic') &&
+    (a.telegram_bot_token ?? '') === (b.telegram_bot_token ?? '') &&
+    (a.telegram_chat_id ?? '') === (b.telegram_chat_id ?? '')
+  );
+}
 
 export function SettingsPage({
   settings,
@@ -38,6 +58,8 @@ export function SettingsPage({
 }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [form, setForm] = useState<GlobalSettings>(settings);
+  const lastSyncedRef = useRef<GlobalSettings>(settings);
+  const forceSyncRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
@@ -63,25 +85,14 @@ export function SettingsPage({
   const [confirmRevokeOthers, setConfirmRevokeOthers] = useState(false);
   const [revokingOthers, setRevokingOthers] = useState(false);
 
-  const hasUnsavedChanges =
-    form.transfers !== settings.transfers ||
-    form.checkers !== settings.checkers ||
-    form.bwlimit !== settings.bwlimit ||
-    form.retries !== settings.retries ||
-    form.low_level_retries !== settings.low_level_retries ||
-    form.timeout !== settings.timeout ||
-    form.contimeout !== settings.contimeout ||
-    form.log_retention_days !== settings.log_retention_days ||
-    form.timezone !== settings.timezone ||
-    form.max_concurrent_jobs !== settings.max_concurrent_jobs ||
-    (form.webhook_url ?? '') !== (settings.webhook_url ?? '') ||
-    (form.webhook_on || 'failure') !== (settings.webhook_on || 'failure') ||
-    (form.webhook_type || 'generic') !== (settings.webhook_type || 'generic') ||
-    (form.telegram_bot_token ?? '') !== (settings.telegram_bot_token ?? '') ||
-    (form.telegram_chat_id ?? '') !== (settings.telegram_chat_id ?? '');
+  const hasUnsavedChanges = !settingsEqual(form, settings);
 
   useEffect(() => {
-    setForm(settings);
+    const prevSynced = lastSyncedRef.current;
+    const force = forceSyncRef.current;
+    lastSyncedRef.current = settings;
+    forceSyncRef.current = false;
+    setForm((prev) => (force || settingsEqual(prev, prevSynced) ? settings : prev));
   }, [settings]);
 
   const loadSessions = useCallback(async () => {
@@ -104,7 +115,9 @@ export function SettingsPage({
     e.preventDefault();
     setSaving(true);
     try {
-      await api.updateSettings(form);
+      const updated = await api.updateSettings(form);
+      lastSyncedRef.current = updated;
+      setForm(updated);
       onToast('Global settings saved');
       onSaved();
     } catch (err) {
@@ -144,6 +157,7 @@ export function SettingsPage({
         isYaml ? 'application/yaml' : 'application/json'
       );
       onToast(`Imported ${res.jobs_imported} job(s) (${res.mode} mode)`);
+      forceSyncRef.current = true;
       onSaved();
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Import failed', true);
@@ -195,6 +209,7 @@ export function SettingsPage({
       onToast(
         `Restored ${res.remotes_imported} remote(s) and ${res.jobs_imported} job(s) (${res.mode} mode)`
       );
+      forceSyncRef.current = true;
       onSaved();
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Encrypted backup restore failed', true);

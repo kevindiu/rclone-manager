@@ -26,6 +26,9 @@ var ErrJobAlreadyRunning = errors.New("job is already running")
 // ErrJobNotRunning is returned when attempting to stop a job that is not currently active.
 var ErrJobNotRunning = errors.New("job is not running")
 
+// ErrShuttingDown is returned when attempting to start a job while the runner is shutting down.
+var ErrShuttingDown = errors.New("runner is shutting down")
+
 type activeRun struct {
 	mu       sync.RWMutex
 	snapshot domain.ActiveRunSnapshot
@@ -45,9 +48,10 @@ type Runner struct {
 
 	gate *concurrencyGate
 
-	mu     sync.RWMutex
-	active map[string]*activeRun // keyed by jobID
-	wg     sync.WaitGroup
+	mu           sync.RWMutex
+	shuttingDown bool
+	active       map[string]*activeRun // keyed by jobID
+	wg           sync.WaitGroup
 }
 
 // NewRunner creates a new job Runner.
@@ -121,6 +125,10 @@ func (r *Runner) StartJob(job domain.Job, trigger string, dryRun bool) (*domain.
 	}
 
 	r.mu.Lock()
+	if r.shuttingDown {
+		r.mu.Unlock()
+		return nil, ErrShuttingDown
+	}
 	if _, running := r.active[job.ID]; running {
 		r.mu.Unlock()
 		if trigger == "schedule" {
@@ -139,6 +147,7 @@ func (r *Runner) StartJob(job domain.Job, trigger string, dryRun bool) (*domain.
 				r.logger.Warn("failed to record skipped run", "job_id", job.ID, "error", err)
 			}
 			r.hub.Broadcast("run_completed", skippedRun)
+			r.dispatchNotification(skippedRun, job.NotifyOverride)
 		}
 		return nil, ErrJobAlreadyRunning
 	}
@@ -206,14 +215,15 @@ func (r *Runner) Wait() {
 	r.wg.Wait()
 }
 
-// Shutdown cancels all running jobs and waits for them to clean up.
+// Shutdown marks the runner as shutting down, cancels all running jobs, and waits for them to clean up.
 func (r *Runner) Shutdown() {
-	r.mu.RLock()
+	r.mu.Lock()
+	r.shuttingDown = true
 	ids := make([]string, 0, len(r.active))
 	for id := range r.active {
 		ids = append(ids, id)
 	}
-	r.mu.RUnlock()
+	r.mu.Unlock()
 	for _, id := range ids {
 		_ = r.StopJob(id)
 	}
@@ -249,7 +259,7 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 		finish("failed", fmt.Sprintf("Failed to create log dir: %v", err))
 		return
 	}
-	logFile, err := os.OpenFile(run.LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	logFile, err := os.OpenFile(run.LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		finish("failed", fmt.Sprintf("Failed to open log file: %v", err))
 		return
@@ -442,27 +452,31 @@ func (r *Runner) finishRun(run *domain.JobRun, status, errMsg, notifyOverride st
 		r.logger.Error("failed to finalize run record", "run_id", run.ID, "status", status, "error", err)
 	}
 	r.hub.Broadcast("run_completed", *run)
+	r.dispatchNotification(*run, notifyOverride)
+}
 
+func (r *Runner) dispatchNotification(run domain.JobRun, notifyOverride string) {
 	r.mu.RLock()
 	notifier := r.notifier
 	r.mu.RUnlock()
-	if notifier != nil {
-		settings, err := r.store.GetSettings(context.Background(), r.defaults)
-		if err != nil {
-			settings = r.defaults
-		}
-		settings.WebhookOn = notify.EffectiveWebhookOn(settings.WebhookOn, notifyOverride)
-		if settings.WebhookURL != "" && notify.ShouldNotify(settings.WebhookOn, status) {
-			runCopy := *run
-			r.wg.Add(1)
-			go func() {
-				defer r.wg.Done()
-				nCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				notifier.NotifyRun(nCtx, settings, runCopy)
-			}()
-		}
+	if notifier == nil {
+		return
 	}
+	settings, err := r.store.GetSettings(context.Background(), r.defaults)
+	if err != nil {
+		settings = r.defaults
+	}
+	settings.WebhookOn = notify.EffectiveWebhookOn(settings.WebhookOn, notifyOverride)
+	if !notify.HasDeliveryTarget(settings) || !notify.ShouldNotify(settings.WebhookOn, run.Status) {
+		return
+	}
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		nCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		notifier.NotifyRun(nCtx, settings, run)
+	}()
 }
 
 func extractErrorMsg(line string) string {

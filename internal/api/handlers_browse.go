@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/rclone"
+	"github.com/kevindiu/rclone-manager/internal/runner"
 	"github.com/kevindiu/rclone-manager/internal/service"
 )
 
@@ -68,6 +69,7 @@ func (s *Server) handleBrowseSize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "remote query parameter is required")
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	sz, err := s.client.DirSize(r.Context(), remote, subpath)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -253,11 +255,8 @@ func (s *Server) handleBrowseDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBrowseBulkDelete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Remote  string `json:"remote"`
-		Entries []struct {
-			Path  string `json:"path"`
-			IsDir bool   `json:"is_dir"`
-		} `json:"entries"`
+		Remote  string                   `json:"remote"`
+		Entries []rclone.BulkDeleteEntry `json:"entries"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
@@ -278,27 +277,16 @@ func (s *Server) handleBrowseBulkDelete(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	if err := s.client.EnsureRemoteExists(r.Context(), req.Remote); err != nil {
+
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	deleted, failed, err := s.client.BulkDeletePaths(r.Context(), req.Remote, req.Entries)
+	if err != nil {
 		if errors.Is(err, rclone.ErrRemoteNotFound) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
-	}
-
-	type bulkFailure struct {
-		Path  string `json:"path"`
-		Error string `json:"error"`
-	}
-	deleted := 0
-	failed := make([]bulkFailure, 0)
-	for _, entry := range req.Entries {
-		if err := s.client.DeletePath(r.Context(), req.Remote, entry.Path, entry.IsDir); err != nil {
-			failed = append(failed, bulkFailure{Path: entry.Path, Error: err.Error()})
-		} else {
-			deleted++
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deleted": deleted,
@@ -329,6 +317,33 @@ func safeInlineContentType(filename string) (string, bool) {
 		return "text/plain; charset=utf-8", true
 	}
 	return "", false
+}
+
+type lazyDownloadWriter struct {
+	w           http.ResponseWriter
+	contentType string
+	disposition string
+	size        int64
+	started     bool
+}
+
+func (l *lazyDownloadWriter) initHeaders() {
+	if l.started {
+		return
+	}
+	l.started = true
+	l.w.Header().Set("Content-Type", l.contentType)
+	l.w.Header().Set("Content-Disposition", l.disposition)
+	if l.size >= 0 {
+		l.w.Header().Set("Content-Length", fmt.Sprintf("%d", l.size))
+	}
+}
+
+func (l *lazyDownloadWriter) Write(p []byte) (int, error) {
+	if !l.started {
+		l.initHeaders()
+	}
+	return l.w.Write(p)
 }
 
 func (s *Server) handleBrowseDownload(w http.ResponseWriter, r *http.Request) {
@@ -374,15 +389,23 @@ func (s *Server) handleBrowseDownload(w http.ResponseWriter, r *http.Request) {
 		disposition = dispType
 	}
 
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", disposition)
-	if stat.Size >= 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size))
+	lw := &lazyDownloadWriter{
+		w:           w,
+		contentType: contentType,
+		disposition: disposition,
+		size:        stat.Size,
 	}
 
-	if err := s.client.StreamFile(r.Context(), remote, subpath, w); err != nil {
+	if err := s.client.StreamFile(r.Context(), remote, subpath, lw); err != nil {
 		s.logger.Warn("browse download stream failed", "remote", remote, "path", subpath, "error", err)
+		if !lw.started {
+			writeError(w, http.StatusBadGateway, "failed to download file")
+		}
 		return
+	}
+	if !lw.started {
+		lw.initHeaders()
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -400,6 +423,10 @@ func (s *Server) handleBrowseVersions(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrValidation) {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, runner.ErrShuttingDown) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	if err != nil {
@@ -427,6 +454,10 @@ func (s *Server) handleBrowseRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrValidation) {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, runner.ErrShuttingDown) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	if err != nil {

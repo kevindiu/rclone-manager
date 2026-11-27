@@ -78,3 +78,17 @@ func TestLoadSessionTTLFallbackAndClamp(t *testing.T) {
 		t.Fatalf("expected 5m clamp, got %v", cfg.SessionTTL)
 	}
 }
+
+func TestLoadTrustedProxies(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("RCLONE_MANAGER_DATA_DIR", dir)
+	t.Setenv("RCLONE_MANAGER_TRUSTED_PROXIES", "127.0.0.1, 172.16.0.0/12, ::1, invalid-entry")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 3 {
+		t.Fatalf("expected 3 parsed trusted proxies, got %v", cfg.TrustedProxies)
+	}
+}

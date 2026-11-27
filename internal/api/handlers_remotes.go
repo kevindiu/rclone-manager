@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/rclone"
 	"github.com/kevindiu/rclone-manager/internal/service"
@@ -156,6 +157,7 @@ func (s *Server) handleAboutRemote(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCleanupRemote(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	if err := s.client.CleanupRemote(r.Context(), name); err != nil {
 		if errors.Is(err, rclone.ErrRemoteNotFound) {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -178,6 +180,7 @@ func (s *Server) handleDedupeRemote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	res, err := s.client.DedupeRemote(r.Context(), name, req.Path, req.Mode, req.DryRun)
 	if err != nil {
 		if errors.Is(err, rclone.ErrRemoteNotFound) {

@@ -110,6 +110,7 @@ func ParseINI(content string) ([]INISection, error) {
 
 	var sections []INISection
 	var current *INISection
+	seenNames := make(map[string]bool)
 	lineNo := 0
 
 	for scanner.Scan() {
@@ -123,6 +124,10 @@ func ParseINI(content string) ([]INISection, error) {
 			if err := ValidateRemoteName(name); err != nil {
 				return nil, fmt.Errorf("line %d: %w", lineNo, err)
 			}
+			if seenNames[name] {
+				return nil, fmt.Errorf("line %d: duplicate remote section [%s]", lineNo, name)
+			}
+			seenNames[name] = true
 			sections = append(sections, INISection{Name: name})
 			current = &sections[len(sections)-1]
 			continue
@@ -216,6 +221,7 @@ func MergeOrValidateINI(ctx context.Context, rcloneBin, existingConfPath, incomi
 			for _, s := range incomingSections {
 				if !seen[s.Name] {
 					finalSections = append(finalSections, s)
+					seen[s.Name] = true
 				}
 			}
 		} else {

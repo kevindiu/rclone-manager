@@ -14,6 +14,13 @@ var managedFlags = []string{
 	"--rc-addr",
 	"--log-file",
 	"--stats-log-level",
+	"--dry-run",
+	"-n",
+	"--password-command",
+	"--dump",
+	"--dump-bodies",
+	"--backup-dir",
+	"--ask-password",
 }
 
 // ParseFlags tokenizes a CLI flag string into argument tokens using shell-like
@@ -107,6 +114,25 @@ func ValidateCustomFlags(tokens []string) error {
 		for _, blocked := range managedFlags {
 			if lower == blocked || strings.HasPrefix(lower, blocked+"=") {
 				return fmt.Errorf("flag %q is managed by rclone-manager and cannot be overridden", blocked)
+			}
+		}
+		// Reject bundled short flags containing -n (e.g. -nv, -vn) while allowing filter rules like "- *.tmp".
+		if len(lower) >= 2 && lower[0] == '-' && lower[1] != '-' {
+			rest := lower[1:]
+			onlyLetters := true
+			hasN := false
+			for i := 0; i < len(rest); i++ {
+				c := rest[i]
+				if c < 'a' || c > 'z' {
+					onlyLetters = false
+					break
+				}
+				if c == 'n' {
+					hasN = true
+				}
+			}
+			if onlyLetters && hasN {
+				return fmt.Errorf("flag %q is managed by rclone-manager and cannot be overridden", "-n")
 			}
 		}
 	}

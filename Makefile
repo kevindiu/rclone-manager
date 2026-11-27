@@ -3,10 +3,13 @@ IMAGE ?= ghcr.io/kevindiu/rclone-manager
 APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 RCLONE_VERSION ?= 1.76.0
 
-.PHONY: build-web lint-web build-go build vet test check dev docker-build docker-buildx docker-push clean
+.PHONY: build-web lint-web test-web build-go build vet test check dev docker-build docker-buildx docker-push clean
 
 lint-web:
 	cd web && npm run lint
+
+test-web:
+	cd web && npm test
 
 build-web:
 	cd web && npm ci && npm run build
@@ -22,7 +25,7 @@ vet:
 test:
 	go test -race -v ./...
 
-check: lint-web build-web vet test
+check: lint-web test-web build-web vet test
 
 dev:
 	go run ./cmd/rclone-manager

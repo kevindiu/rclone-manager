@@ -166,7 +166,11 @@ func (s *AppService) ExportEncryptedBackup(ctx context.Context, passphrase strin
 		return nil, fmt.Errorf("%w: backup passphrase must be at least %d characters", ErrValidation, minBackupPassphraseLen)
 	}
 
-	bundle, err := s.ExportBundle(ctx)
+	settings, err := s.store.GetSettings(ctx, s.defaults)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := s.store.ListJobs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -181,9 +185,9 @@ func (s *AppService) ExportEncryptedBackup(ctx context.Context, passphrase strin
 
 	payload := fullBackupPayload{
 		Version:    encryptedBackupVersion,
-		ExportedAt: bundle.ExportedAt,
-		Settings:   bundle.Settings,
-		Jobs:       bundle.Jobs,
+		ExportedAt: time.Now().UTC(),
+		Settings:   settings,
+		Jobs:       jobs,
 		RcloneConf: rawConf,
 	}
 	plaintext, err := json.Marshal(payload)
@@ -225,7 +229,13 @@ func (s *AppService) ImportEncryptedBackup(ctx context.Context, raw []byte, pass
 		}
 	}
 
+	var prevConf string
+	if s.browser != nil {
+		prevConf, _ = s.browser.ReadRawConf(ctx)
+	}
+
 	importedRemotes := []string{}
+	confMutated := false
 	if strings.TrimSpace(payload.RcloneConf) != "" {
 		if s.browser == nil {
 			return FullImportResult{}, errors.New("rclone client unavailable")
@@ -234,9 +244,15 @@ func (s *AppService) ImportEncryptedBackup(ctx context.Context, raw []byte, pass
 		if err != nil {
 			return FullImportResult{}, fmt.Errorf("%w: import rclone.conf: %v", ErrValidation, err)
 		}
+		confMutated = true
 		if names != nil {
 			importedRemotes = names
 		}
+	} else if mode == "replace" && s.browser != nil && strings.TrimSpace(prevConf) != "" {
+		if err := s.browser.ClearConf(ctx); err != nil {
+			return FullImportResult{}, fmt.Errorf("clear rclone.conf: %w", err)
+		}
+		confMutated = true
 	}
 
 	if err := s.ImportBundle(ctx, domain.ExportBundle{
@@ -245,6 +261,15 @@ func (s *AppService) ImportEncryptedBackup(ctx context.Context, raw []byte, pass
 		Settings:   payload.Settings,
 		Jobs:       payload.Jobs,
 	}, mode); err != nil {
+		if confMutated && s.browser != nil {
+			if strings.TrimSpace(prevConf) != "" {
+				if _, rbErr := s.browser.ImportConf(ctx, prevConf, "replace"); rbErr != nil {
+					s.logger.Warn("failed to rollback rclone.conf after bundle import error", "error", rbErr)
+				}
+			} else if rbErr := s.browser.ClearConf(ctx); rbErr != nil {
+				s.logger.Warn("failed to clear rclone.conf during rollback", "error", rbErr)
+			}
+		}
 		return FullImportResult{}, err
 	}
 

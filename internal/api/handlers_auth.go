@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -31,9 +32,31 @@ func authFromContext(ctx context.Context) (authContext, bool) {
 	return ac, ok
 }
 
-func isSecureRequest(r *http.Request) bool {
+func (s *Server) isTrustedProxy(ipStr string) bool {
+	if s == nil || s.cfg == nil || len(s.cfg.TrustedProxies) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(ipStr))
+	if err != nil {
+		return false
+	}
+	unmapped := addr.Unmap()
+	for _, prefix := range s.cfg.TrustedProxies {
+		if prefix.Contains(unmapped) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) isSecureRequest(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
+	}
+	if s != nil && s.cfg != nil && len(s.cfg.TrustedProxies) > 0 {
+		if !s.isTrustedProxy(remoteAddrHost(r)) {
+			return false
+		}
 	}
 	xfp := r.Header.Get("X-Forwarded-Proto")
 	if idx := strings.IndexByte(xfp, ','); idx >= 0 {
@@ -42,7 +65,7 @@ func isSecureRequest(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(xfp), "https")
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, rawToken string, expiresAt time.Time) {
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, rawToken string, expiresAt time.Time) {
 	maxAge := int(time.Until(expiresAt).Seconds())
 	if maxAge < 0 {
 		maxAge = 0
@@ -55,11 +78,11 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, rawToken string, e
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecureRequest(r),
+		Secure:   s.isSecureRequest(r),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -68,7 +91,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecureRequest(r),
+		Secure:   s.isSecureRequest(r),
 	})
 }
 
@@ -80,12 +103,37 @@ func sessionTokenFromRequest(r *http.Request) string {
 	return c.Value
 }
 
-func clientIP(r *http.Request) string {
+func remoteAddrHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
 	if err == nil && host != "" {
 		return host
 	}
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	remoteHost := remoteAddrHost(r)
+	if !s.isTrustedProxy(remoteHost) {
+		return remoteHost
+	}
+	xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if xff == "" {
+		return remoteHost
+	}
+	parts := strings.Split(xff, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(parts[i])
+		if candidate == "" {
+			continue
+		}
+		if addr, err := netip.ParseAddr(candidate); err == nil {
+			unmapped := addr.Unmap().String()
+			if !s.isTrustedProxy(unmapped) {
+				return unmapped
+			}
+		}
+	}
+	return remoteHost
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +168,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, r, res.RawToken, res.ExpiresAt)
+	s.setSessionCookie(w, r, res.RawToken, res.ExpiresAt)
 	writeJSON(w, http.StatusCreated, map[string]any{"user": res.User})
 }
 
@@ -134,7 +182,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.auth.Login(r.Context(), clientIP(r), req.Username, req.Password)
+	res, err := s.auth.Login(r.Context(), s.clientIP(r), req.Username, req.Password)
 	if err != nil {
 		var rlErr *service.RateLimitError
 		switch {
@@ -150,7 +198,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, r, res.RawToken, res.ExpiresAt)
+	s.setSessionCookie(w, r, res.RawToken, res.ExpiresAt)
 	writeJSON(w, http.StatusOK, map[string]any{"user": res.User})
 }
 
@@ -158,7 +206,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if err := s.auth.Logout(r.Context(), sessionTokenFromRequest(r)); err != nil {
 		s.logger.Warn("logout session cleanup failed", "error", err)
 	}
-	clearSessionCookie(w, r)
+	s.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 

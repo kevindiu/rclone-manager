@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/db"
 	"github.com/kevindiu/rclone-manager/internal/domain"
@@ -143,6 +144,10 @@ func (s *Server) handleRunJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
+	if errors.Is(err, runner.ErrShuttingDown) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	if err != nil {
 		s.writeInternalError(w, r, "run job failed", err)
 		return
@@ -178,6 +183,7 @@ func (s *Server) handleDryRunDraftJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	res, err := s.svc.DryRunDraftJob(r.Context(), job)
 	if errors.Is(err, service.ErrValidation) {
 		writeError(w, http.StatusBadRequest, err.Error())

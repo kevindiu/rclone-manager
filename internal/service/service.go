@@ -63,6 +63,7 @@ type RcloneBrowser interface {
 	DeleteRemote(ctx context.Context, name string) error
 	ReadRawConf(ctx context.Context) (string, error)
 	ImportConf(ctx context.Context, content, mode string) ([]string, error)
+	ClearConf(ctx context.Context) error
 	ListVersions(ctx context.Context, remote, subpath string, extra []rclone.VersionRootCandidate) ([]rclone.FileVersion, error)
 }
 
@@ -270,11 +271,14 @@ func (s *AppService) TestWebhookSettings(ctx context.Context, webhookURL, webhoo
 	})
 }
 
-// ExportBundle exports settings and all jobs into a portable bundle.
+// ExportBundle exports settings and all jobs into a portable bundle with secrets masked.
 func (s *AppService) ExportBundle(ctx context.Context) (domain.ExportBundle, error) {
 	settings, err := s.store.GetSettings(ctx, s.defaults)
 	if err != nil {
 		return domain.ExportBundle{}, err
+	}
+	if settings.TelegramBotToken != "" {
+		settings.TelegramBotToken = rclone.MaskedSecret
 	}
 	jobs, err := s.store.ListJobs(ctx)
 	if err != nil {
@@ -293,6 +297,13 @@ func (s *AppService) ImportBundle(ctx context.Context, bundle domain.ExportBundl
 	if mode != "merge" && mode != "replace" {
 		return fmt.Errorf("%w: mode must be merge or replace", ErrValidation)
 	}
+	if strings.TrimSpace(bundle.Settings.TelegramBotToken) == rclone.MaskedSecret {
+		if existing, err := s.store.GetSettings(ctx, s.defaults); err == nil {
+			bundle.Settings.TelegramBotToken = existing.TelegramBotToken
+		} else {
+			bundle.Settings.TelegramBotToken = ""
+		}
+	}
 	if err := validateSettingsFields(&bundle.Settings); err != nil {
 		return err
 	}
@@ -304,7 +315,15 @@ func (s *AppService) ImportBundle(ctx context.Context, bundle domain.ExportBundl
 	if err := s.store.ImportBundle(ctx, bundle, mode, s.defaults); err != nil {
 		return err
 	}
-	s.runner.UpdateMaxConcurrent(bundle.Settings.MaxConcurrentJobs)
+	effectiveMax := bundle.Settings.MaxConcurrentJobs
+	if effectiveMax < 1 {
+		if persisted, err := s.store.GetSettings(ctx, s.defaults); err == nil && persisted.MaxConcurrentJobs >= 1 {
+			effectiveMax = persisted.MaxConcurrentJobs
+		} else {
+			effectiveMax = max(1, s.defaults.MaxConcurrentJobs)
+		}
+	}
+	s.runner.UpdateMaxConcurrent(effectiveMax)
 	s.reloadScheduler()
 	s.hub.Broadcast("job_updated", map[string]any{"imported": len(bundle.Jobs)})
 	return nil

@@ -40,6 +40,7 @@ const TEXT_EXTS = new Set([
 ]);
 const TEXT_BASENAMES = new Set(['dockerfile', 'makefile', '.gitignore', '.env']);
 const MAX_TEXT_PREVIEW_BYTES = 512 * 1024;
+const MAX_PDF_PREVIEW_BYTES = 25 * 1024 * 1024;
 
 function getPreviewKind(filename: string): 'image' | 'pdf' | 'text' | 'unsupported' {
   const lower = filename.toLowerCase();
@@ -73,37 +74,78 @@ export function FilePreviewModal({
   const inlineUrl = api.previewUrl(remote, fullPath);
   const downloadHref = api.downloadUrl(remote, fullPath);
   const tooLargeForText = kind === 'text' && entry.Size > MAX_TEXT_PREVIEW_BYTES;
+  const tooLargeForPdf = kind === 'pdf' && entry.Size > MAX_PDF_PREVIEW_BYTES;
 
   const [textContent, setTextContent] = useState('');
-  const [loading, setLoading] = useState(kind === 'text' && !tooLargeForText);
+  const [pdfUrl, setPdfUrl] = useState('');
+  const [loading, setLoading] = useState(
+    (kind === 'text' && !tooLargeForText) || (kind === 'pdf' && !tooLargeForPdf)
+  );
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (kind !== 'text' || tooLargeForText) return;
-    let cancelled = false;
-    setLoading(true);
-    setError('');
-    fetch(inlineUrl, { credentials: 'same-origin' })
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        return res.text();
-      })
-      .then((txt) => {
-        if (!cancelled) setTextContent(txt);
-      })
-      .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : 'Failed to load file preview');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [inlineUrl, kind, tooLargeForText]);
+    if (kind === 'text' && !tooLargeForText) {
+      let cancelled = false;
+      setLoading(true);
+      setError('');
+      setTextContent('');
+      fetch(inlineUrl, { credentials: 'same-origin' })
+        .then(async (res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          return res.text();
+        })
+        .then((txt) => {
+          if (!cancelled) setTextContent(txt);
+        })
+        .catch((err) => {
+          if (!cancelled)
+            setError(err instanceof Error ? err.message : 'Failed to load file preview');
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (kind === 'pdf' && !tooLargeForPdf) {
+      let cancelled = false;
+      let objectUrl = '';
+      setLoading(true);
+      setError('');
+      setPdfUrl('');
+      fetch(inlineUrl, { credentials: 'same-origin' })
+        .then(async (res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const buf = await res.arrayBuffer();
+          return new Blob([buf], { type: 'application/pdf' });
+        })
+        .then((blob) => {
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setPdfUrl(objectUrl);
+        })
+        .catch((err) => {
+          if (!cancelled)
+            setError(err instanceof Error ? err.message : 'Failed to load PDF preview');
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
+    }
+
+    setLoading(false);
+    return undefined;
+  }, [inlineUrl, kind, tooLargeForPdf, tooLargeForText]);
 
   return (
     <Modal
@@ -141,11 +183,23 @@ export function FilePreviewModal({
       )}
 
       {kind === 'pdf' && (
-        <iframe
-          src={inlineUrl}
-          title={entry.Name}
-          className="w-full h-[65vh] rounded-xl border border-slate-800 bg-white"
-        />
+        <div className="rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
+          {tooLargeForPdf ? (
+            <p className="text-xs text-slate-400 py-6 px-4 text-center">
+              PDF is {formatBytes(entry.Size)}, which exceeds the 25 MiB inline preview limit. Use
+              Download instead.
+            </p>
+          ) : loading ? (
+            <div className="flex items-center justify-center py-12 text-xs text-slate-400 gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading PDF preview...
+            </div>
+          ) : error ? (
+            <p className="text-xs text-rose-300 py-6 px-4 text-center">{error}</p>
+          ) : pdfUrl ? (
+            <iframe src={pdfUrl} title={entry.Name} className="w-full h-[65vh] bg-white border-0" />
+          ) : null}
+        </div>
       )}
 
       {kind === 'text' && (

@@ -51,7 +51,7 @@ export function BrowsePage({
   jobs: JobWithStatus[];
   activeRuns: ActiveRunSnapshot[];
   initialRemote?: string;
-  onNavigate: (tab: Tab) => void;
+  onNavigate: (tab: Tab, opts?: { remote?: string }) => void;
   onViewActiveLogs: (run: ActiveRunSnapshot) => void;
   onToast: (msg: string, isError?: boolean) => void;
 }) {
@@ -104,10 +104,14 @@ export function BrowsePage({
     if (initialRemote) {
       setRemote(initialRemote);
       setSubpath('');
-    } else if (!remote && remotes[0]?.name) {
+    }
+  }, [initialRemote]);
+
+  useEffect(() => {
+    if (!remote && remotes[0]?.name) {
       setRemote(remotes[0].name);
     }
-  }, [initialRemote, remotes, remote]);
+  }, [remote, remotes]);
 
   const loadDir = useCallback(
     async (targetRemote = remote, targetPath = subpath) => {
@@ -345,8 +349,10 @@ export function BrowsePage({
         <select
           value={remote}
           onChange={(e) => {
-            setRemote(e.target.value);
+            const nextRemote = e.target.value;
+            setRemote(nextRemote);
             setSubpath('');
+            onNavigate('browse', nextRemote ? { remote: nextRemote } : undefined);
           }}
           className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
         >

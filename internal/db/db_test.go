@@ -509,3 +509,63 @@ func TestDailyRunStatsAndDeleteFinishedRuns(t *testing.T) {
 		t.Fatalf("expected running run preserved, got %v", err)
 	}
 }
+
+func TestJobsPreserveAllOperations(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	ops := []string{"copy", "sync", "move", "check", "bisync"}
+	for _, op := range ops {
+		created, err := store.CreateJob(ctx, domain.Job{
+			Name:        "Op-" + op,
+			Operation:   op,
+			Source:      "/src",
+			Destination: "r2:dst",
+		})
+		if err != nil {
+			t.Fatalf("CreateJob(%s): %v", op, err)
+		}
+		if created.Operation != op {
+			t.Fatalf("CreateJob(%s) mutated operation to %q", op, created.Operation)
+		}
+
+		got, err := store.GetJob(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("GetJob(%s): %v", op, err)
+		}
+		if got.Operation != op {
+			t.Fatalf("GetJob(%s) returned operation %q", op, got.Operation)
+		}
+
+		got.Description = "updated"
+		updated, err := store.UpdateJob(ctx, got.ID, *got)
+		if err != nil {
+			t.Fatalf("UpdateJob(%s): %v", op, err)
+		}
+		if updated.Operation != op {
+			t.Fatalf("UpdateJob(%s) mutated operation to %q", op, updated.Operation)
+		}
+	}
+
+	bundle := domain.ExportBundle{
+		Version:  1,
+		Settings: defaultTestSettings(),
+		Jobs: []domain.Job{
+			{ID: "imp-move", Name: "ImpMove", Operation: "move", Source: "/a", Destination: "/b"},
+			{ID: "imp-check", Name: "ImpCheck", Operation: "check", Source: "/a", Destination: "/b"},
+			{ID: "imp-bisync", Name: "ImpBisync", Operation: "bisync", Source: "/a", Destination: "/b"},
+		},
+	}
+	if err := store.ImportBundle(ctx, bundle, "merge", defaultTestSettings()); err != nil {
+		t.Fatalf("ImportBundle: %v", err)
+	}
+	for _, tc := range bundle.Jobs {
+		got, err := store.GetJob(ctx, tc.ID)
+		if err != nil {
+			t.Fatalf("GetJob(%s) after import: %v", tc.ID, err)
+		}
+		if got.Operation != tc.Operation {
+			t.Fatalf("ImportBundle(%s) mutated operation to %q", tc.Operation, got.Operation)
+		}
+	}
+}

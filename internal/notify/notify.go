@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -183,7 +184,7 @@ func (n *Notifier) doRequest(ctx context.Context, webhookURL, contentType string
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cleanURL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("build webhook request failed")
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", "rclone-manager")
@@ -195,7 +196,11 @@ func (n *Notifier) doRequest(ctx context.Context, webhookURL, contentType string
 
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return err
+		var uErr *url.Error
+		if errors.As(err, &uErr) && uErr.Err != nil {
+			return fmt.Errorf("webhook request failed: %v", uErr.Err)
+		}
+		return fmt.Errorf("webhook request failed")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -207,6 +212,7 @@ func (n *Notifier) doRequest(ctx context.Context, webhookURL, contentType string
 		}
 		return fmt.Errorf("webhook returned HTTP %d", resp.StatusCode)
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	return nil
 }
 
