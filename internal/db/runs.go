@@ -317,11 +317,16 @@ func (s *Store) DeleteFinishedRuns(ctx context.Context, jobID, status, trigger s
 
 // GetDailyRunStats returns dense per-day run statistics over the last days (UTC).
 func (s *Store) GetDailyRunStats(ctx context.Context, days int) ([]domain.DailyRunStat, error) {
+	const (
+		defaultStatsDays = 14
+		maxStatsDays     = 90
+	)
+
 	if days <= 0 {
-		days = 14
+		days = defaultStatsDays
 	}
-	if days > 90 {
-		days = 90
+	if days > maxStatsDays {
+		days = maxStatsDays
 	}
 
 	nowUTC := time.Now().UTC()
