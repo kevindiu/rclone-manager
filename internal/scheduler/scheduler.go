@@ -177,16 +177,23 @@ func PreviewCron(expr, tz string, count int) ([]time.Time, error) {
 			loc = loaded
 		}
 	}
-	if count <= 0 {
-		count = 5
+
+	const (
+		defaultPreviewCount = 5
+		maxPreviewCount     = 20
+	)
+
+	safeCount := count
+	if safeCount <= 0 {
+		safeCount = defaultPreviewCount
 	}
-	if count > 20 {
-		count = 20
+	if safeCount > maxPreviewCount {
+		safeCount = maxPreviewCount
 	}
 
-	times := make([]time.Time, 0, count)
+	times := make([]time.Time, 0, safeCount)
 	cur := time.Now().In(loc)
-	for i := 0; i < count; i++ {
+	for i := 0; i < safeCount; i++ {
 		next := sched.Next(cur)
 		if next.IsZero() {
 			break
