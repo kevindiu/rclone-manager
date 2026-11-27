@@ -225,8 +225,15 @@ export function App() {
         <div className="p-5 border-b border-slate-800 flex items-center gap-3">
           <img src="/icon.svg" alt="logo" className="w-8 h-8 rounded-lg" />
           <div className="min-w-0">
-            <div className="font-bold text-sm tracking-tight text-slate-100 truncate">
-              rclone-manager
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-sm tracking-tight text-slate-100 truncate">
+                rclone-manager
+              </span>
+              {systemInfo?.app_version && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 shrink-0">
+                  {systemInfo.app_version}
+                </span>
+              )}
             </div>
             <div className="text-[11px] font-mono text-slate-400 truncate">
               {systemInfo?.rclone_version || 'loading...'}
@@ -292,9 +299,14 @@ export function App() {
 
       {/* Mobile Top Header */}
       <header className="md:hidden sticky top-0 z-30 pt-safe bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <img src="/icon.svg" alt="logo" className="w-7 h-7 rounded-lg" />
-          <span className="font-bold text-sm text-slate-100">rclone-manager</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <img src="/icon.svg" alt="logo" className="w-7 h-7 rounded-lg shrink-0" />
+          <span className="font-bold text-sm text-slate-100 truncate">rclone-manager</span>
+          {systemInfo?.app_version && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 shrink-0">
+              {systemInfo.app_version}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2.5 text-xs">
           {activeRuns.length > 0 && (

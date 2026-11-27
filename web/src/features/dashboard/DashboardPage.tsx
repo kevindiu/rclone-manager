@@ -170,6 +170,9 @@ export function DashboardPage({
               {systemInfo?.rclone_version || '—'}
             </span>
           </div>
+          <div className="text-[11px] font-mono text-slate-400 mt-1 truncate">
+            App {systemInfo?.app_version || 'dev'}
+          </div>
         </div>
       </div>
 

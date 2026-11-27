@@ -1,6 +1,6 @@
 APP_NAME := rclone-manager
 IMAGE ?= ghcr.io/kevindiu/rclone-manager
-APP_VERSION ?= 1.0.0
+APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 RCLONE_VERSION ?= 1.76.0
 
 .PHONY: build-web lint-web build-go build vet test check dev docker-build docker-buildx docker-push clean

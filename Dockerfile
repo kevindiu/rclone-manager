@@ -1,6 +1,6 @@
 # Pinned rclone version (never floating :latest) so upgrades are explicit & reproducible.
 ARG RCLONE_VERSION=1.76.0
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=dev
 
 FROM rclone/rclone:${RCLONE_VERSION} AS rclone-bin
 
@@ -28,9 +28,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM alpine:3.24
 ARG RCLONE_VERSION=1.76.0
+ARG APP_VERSION=dev
 LABEL org.opencontainers.image.title="rclone-manager" \
       org.opencontainers.image.description="Self-hosted, provider-agnostic rclone backup & cloud storage manager" \
       org.opencontainers.image.source="https://github.com/kevindiu/rclone-manager" \
+      org.opencontainers.image.version="${APP_VERSION}" \
       org.rclone.version="${RCLONE_VERSION}"
 
 RUN apk add --no-cache ca-certificates tzdata \
