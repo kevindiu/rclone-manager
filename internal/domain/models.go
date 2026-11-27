@@ -15,7 +15,10 @@ type GlobalSettings struct {
 	Timezone          string `json:"timezone" yaml:"timezone"`
 	MaxConcurrentJobs int    `json:"max_concurrent_jobs" yaml:"max_concurrent_jobs"`
 	WebhookURL        string `json:"webhook_url,omitempty" yaml:"webhook_url,omitempty"`
-	WebhookOn         string `json:"webhook_on,omitempty" yaml:"webhook_on,omitempty"` // "failure" | "always" | "off"
+	WebhookOn         string `json:"webhook_on,omitempty" yaml:"webhook_on,omitempty"`     // "failure" | "always" | "off"
+	WebhookType       string `json:"webhook_type,omitempty" yaml:"webhook_type,omitempty"` // "generic" | "ntfy" | "telegram"
+	TelegramBotToken  string `json:"telegram_bot_token,omitempty" yaml:"telegram_bot_token,omitempty"`
+	TelegramChatID    string `json:"telegram_chat_id,omitempty" yaml:"telegram_chat_id,omitempty"`
 }
 
 // Job represents a configurable backup/sync job.
@@ -24,7 +27,7 @@ type Job struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
-	Operation   string `json:"operation" yaml:"operation"` // "copy" | "sync" | "move" | "check"
+	Operation   string `json:"operation" yaml:"operation"` // "copy" | "sync" | "move" | "check" | "bisync"
 	Source      string `json:"source" yaml:"source"`
 	Destination string `json:"destination" yaml:"destination"`
 	Schedule    string `json:"schedule,omitempty" yaml:"schedule,omitempty"`
@@ -37,6 +40,18 @@ type Job struct {
 	Checksum                bool     `json:"checksum,omitempty" yaml:"checksum,omitempty"`
 	UpdateOnly              bool     `json:"update_only,omitempty" yaml:"update_only,omitempty"`
 	ServerSideAcrossConfigs bool     `json:"server_side_across_configs,omitempty" yaml:"server_side_across_configs,omitempty"`
+	DeleteTiming            string   `json:"delete_timing,omitempty" yaml:"delete_timing,omitempty"` // "" | "during" | "after" | "before"
+	DeleteEmptySrcDirs      bool     `json:"delete_empty_src_dirs,omitempty" yaml:"delete_empty_src_dirs,omitempty"`
+	SymlinkMode             string   `json:"symlink_mode,omitempty" yaml:"symlink_mode,omitempty"` // "" | "links" | "copy_links"
+	SizeOnly                bool     `json:"size_only,omitempty" yaml:"size_only,omitempty"`
+	IgnoreExisting          bool     `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
+	MinAge                  string   `json:"min_age,omitempty" yaml:"min_age,omitempty"`
+	MaxAge                  string   `json:"max_age,omitempty" yaml:"max_age,omitempty"`
+	MinSize                 string   `json:"min_size,omitempty" yaml:"min_size,omitempty"`
+	MaxSize                 string   `json:"max_size,omitempty" yaml:"max_size,omitempty"`
+	BisyncConflictResolve   string   `json:"bisync_conflict_resolve,omitempty" yaml:"bisync_conflict_resolve,omitempty"`
+	BisyncResync            bool     `json:"-" yaml:"-"`
+	NotifyOverride          string   `json:"notify_override,omitempty" yaml:"notify_override,omitempty"` // "" | "failure" | "always" | "off"
 
 	MaxTransfer string `json:"max_transfer,omitempty" yaml:"max_transfer,omitempty"`
 	CutoffMode  string `json:"cutoff_mode,omitempty" yaml:"cutoff_mode,omitempty"` // "soft" | "hard" | "cautious"
@@ -152,4 +167,13 @@ type Session struct {
 	UserID    string    `json:"user_id"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// DailyRunStat aggregates finished job runs per calendar day (UTC) for dashboard charts.
+type DailyRunStat struct {
+	Date             string `json:"date"`
+	SuccessCount     int    `json:"success_count"`
+	FailedCount      int    `json:"failed_count"`
+	OtherCount       int    `json:"other_count"`
+	BytesTransferred int64  `json:"bytes_transferred"`
 }

@@ -5,6 +5,7 @@ import {
   History,
   Play,
   Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
   Square,
@@ -55,6 +56,8 @@ export function JobsPage({
   const [editingJob, setEditingJob] = useState<Job | null | undefined>(undefined);
   const [confirmDeleteJob, setConfirmDeleteJob] = useState<Job | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [confirmResyncJob, setConfirmResyncJob] = useState<Job | null>(null);
+  const [resyncing, setResyncing] = useState(false);
 
   const activeByJob = useMemo(() => new Map(activeRuns.map((r) => [r.job_id, r])), [activeRuns]);
 
@@ -221,6 +224,17 @@ export function JobsPage({
                           <FlaskConical className="w-3.5 h-3.5" />
                           Dry Run
                         </button>
+                        {job.operation === 'bisync' && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmResyncJob(job)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30"
+                            title="Run bisync --resync (required on first run or after resetting state)"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Resync
+                          </button>
+                        )}
                       </>
                     )}
                     <button
@@ -347,6 +361,28 @@ export function JobsPage({
                 setConfirmDeleteJob(null);
               }
             );
+          }}
+        />
+      )}
+
+      {confirmResyncJob && (
+        <ConfirmModal
+          title="Run Bisync Resync"
+          message={`Run "${confirmResyncJob.name}" with --resync? This establishes a fresh two-way baseline between Source and Destination and is required before the first normal bisync run (or after changing paths/filters).`}
+          confirmLabel="Start Resync"
+          danger={false}
+          busy={resyncing}
+          onCancel={() => setConfirmResyncJob(null)}
+          onConfirm={() => {
+            const target = confirmResyncJob;
+            setResyncing(true);
+            void handleAction(
+              () => api.runJob(target.id, false, true),
+              `Started bisync --resync for "${target.name}"`
+            ).finally(() => {
+              setResyncing(false);
+              setConfirmResyncJob(null);
+            });
           }}
         />
       )}

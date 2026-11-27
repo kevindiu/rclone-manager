@@ -87,19 +87,8 @@ FROM job_runs WHERE id = ?
 	return &run, nil
 }
 
-// ListRuns returns job runs ordered newest-first, optionally filtered by jobID, status, and trigger.
-func (s *Store) ListRuns(ctx context.Context, jobID, status, trigger string, limit, offset int) ([]domain.JobRun, int, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 500 {
-		limit = 500
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	var conditions []string
+func buildRunFilterWhere(jobID, status, trigger string, extra ...string) (string, []any) {
+	conditions := append([]string{}, extra...)
 	var args []any
 	if jobID != "" {
 		conditions = append(conditions, "job_id = ?")
@@ -113,11 +102,25 @@ func (s *Store) ListRuns(ctx context.Context, jobID, status, trigger string, lim
 		conditions = append(conditions, "trigger = ?")
 		args = append(args, trigger)
 	}
-
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	if len(conditions) == 0 {
+		return "", args
 	}
+	return "WHERE " + strings.Join(conditions, " AND "), args
+}
+
+// ListRuns returns job runs ordered newest-first, optionally filtered by jobID, status, and trigger.
+func (s *Store) ListRuns(ctx context.Context, jobID, status, trigger string, limit, offset int) ([]domain.JobRun, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	whereClause, args := buildRunFilterWhere(jobID, status, trigger)
 
 	var total int
 	countQuery := "SELECT COUNT(*) FROM job_runs " + whereClause
@@ -274,6 +277,104 @@ WHERE status NOT IN ('running', 'queued') AND started_at < ?
 		}
 	}
 	return deleted, nil
+}
+
+// DeleteFinishedRuns removes completed/inactive job runs matching the optional filters and deletes their log files.
+func (s *Store) DeleteFinishedRuns(ctx context.Context, jobID, status, trigger string) (int64, error) {
+	whereClause, args := buildRunFilterWhere(jobID, status, trigger, "status NOT IN ('running', 'queued')")
+
+	rows, err := s.db.QueryContext(ctx, `SELECT log_file FROM job_runs `+whereClause, args...)
+	if err != nil {
+		return 0, err
+	}
+	var logFiles []string
+	for rows.Next() {
+		var logFile string
+		if scanErr := rows.Scan(&logFile); scanErr != nil {
+			_ = rows.Close()
+			return 0, scanErr
+		}
+		if logFile != "" {
+			logFiles = append(logFiles, logFile)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM job_runs `+whereClause, args...)
+	if err != nil {
+		return 0, err
+	}
+	deleted, _ := res.RowsAffected()
+	for _, lf := range logFiles {
+		_ = os.Remove(lf)
+	}
+	return deleted, nil
+}
+
+// GetDailyRunStats returns dense per-day run statistics over the last days (UTC).
+func (s *Store) GetDailyRunStats(ctx context.Context, days int) ([]domain.DailyRunStat, error) {
+	if days <= 0 {
+		days = 14
+	}
+	if days > 90 {
+		days = 90
+	}
+
+	nowUTC := time.Now().UTC()
+	today := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+	startDay := today.AddDate(0, 0, -(days - 1))
+	cutoff := formatSQLiteTime(startDay)
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT substr(started_at, 1, 10) AS day, status, COALESCE(SUM(bytes_transferred), 0), COUNT(*)
+FROM job_runs
+WHERE started_at >= ? AND status NOT IN ('running', 'queued')
+GROUP BY day, status
+`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	byDay := make(map[string]domain.DailyRunStat, days)
+	for rows.Next() {
+		var day, st string
+		var sumBytes int64
+		var cnt int
+		if err := rows.Scan(&day, &st, &sumBytes, &cnt); err != nil {
+			return nil, err
+		}
+		cur := byDay[day]
+		cur.Date = day
+		cur.BytesTransferred += sumBytes
+		switch st {
+		case "success":
+			cur.SuccessCount += cnt
+		case "failed":
+			cur.FailedCount += cnt
+		default:
+			cur.OtherCount += cnt
+		}
+		byDay[day] = cur
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]domain.DailyRunStat, 0, days)
+	for i := 0; i < days; i++ {
+		d := startDay.AddDate(0, 0, i).Format("2006-01-02")
+		if st, ok := byDay[d]; ok {
+			out = append(out, st)
+		} else {
+			out = append(out, domain.DailyRunStat{Date: d})
+		}
+	}
+	return out, nil
 }
 
 type scanner interface {

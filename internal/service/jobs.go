@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kevindiu/rclone-manager/internal/domain"
 	"github.com/kevindiu/rclone-manager/internal/rclone"
+	"github.com/kevindiu/rclone-manager/internal/runner"
 	"github.com/kevindiu/rclone-manager/internal/scheduler"
 )
 
@@ -129,6 +131,11 @@ func (s *AppService) ToggleJob(ctx context.Context, id string) (*domain.Job, err
 
 // RunJob starts a manual or dry-run execution of a job.
 func (s *AppService) RunJob(ctx context.Context, id string, dryRun bool) (*domain.JobRun, error) {
+	return s.RunJobWithResync(ctx, id, dryRun, false)
+}
+
+// RunJobWithResync starts a manual, dry-run, or bisync --resync execution of a job.
+func (s *AppService) RunJobWithResync(ctx context.Context, id string, dryRun, resync bool) (*domain.JobRun, error) {
 	job, err := s.store.GetJob(ctx, id)
 	if err != nil {
 		return nil, err
@@ -137,7 +144,30 @@ func (s *AppService) RunJob(ctx context.Context, id string, dryRun bool) (*domai
 	if dryRun {
 		trigger = "dry_run"
 	}
-	return s.runner.StartJob(*job, trigger, dryRun)
+	jobCopy := *job
+	jobCopy.BisyncResync = resync && jobCopy.Operation == "bisync"
+	return s.runner.StartJob(jobCopy, trigger, dryRun)
+}
+
+// PreviewJobCommand renders the rclone CLI command that would be executed for job.
+func (s *AppService) PreviewJobCommand(ctx context.Context, job domain.Job, dryRun, resync bool) (string, error) {
+	if err := ValidateJob(&job); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	job.BisyncResync = resync && job.Operation == "bisync"
+	settings, err := s.store.GetSettings(ctx, s.defaults)
+	if err != nil {
+		settings = s.defaults
+	}
+	loc, err := time.LoadLocation(settings.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	args, _, _, err := runner.BuildRcloneArgs(job, settings, "rclone.conf", dryRun, time.Now().In(loc))
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	return "rclone " + runner.FormatCommandPreview(args), nil
 }
 
 // StopJob gracefully stops an active job run.
@@ -183,9 +213,25 @@ func ValidateJob(job *domain.Job) error {
 		job.Operation = "sync"
 	}
 	switch job.Operation {
-	case "copy", "sync", "move", "check":
+	case "copy", "sync", "move", "check", "bisync":
 	default:
-		return errors.New("operation must be 'copy', 'sync', 'move', or 'check'")
+		return errors.New("operation must be 'copy', 'sync', 'move', 'check', or 'bisync'")
+	}
+	if job.DeleteTiming != "" && job.DeleteTiming != "during" && job.DeleteTiming != "after" && job.DeleteTiming != "before" {
+		return errors.New("delete_timing must be during, after, or before")
+	}
+	if job.SymlinkMode != "" && job.SymlinkMode != "links" && job.SymlinkMode != "copy_links" {
+		return errors.New("symlink_mode must be links or copy_links")
+	}
+	if job.BisyncConflictResolve != "" {
+		switch job.BisyncConflictResolve {
+		case "none", "path1", "path2", "newer", "older", "larger", "smaller":
+		default:
+			return errors.New("invalid bisync conflict resolution mode")
+		}
+	}
+	if job.NotifyOverride != "" && job.NotifyOverride != "failure" && job.NotifyOverride != "always" && job.NotifyOverride != "off" {
+		return errors.New("notify_override must be failure, always, or off")
 	}
 	if job.Schedule != "" {
 		if err := scheduler.ValidateCron(job.Schedule); err != nil {

@@ -10,8 +10,16 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kevindiu/rclone-manager/internal/domain"
+	"github.com/kevindiu/rclone-manager/internal/rclone"
 	"github.com/kevindiu/rclone-manager/internal/service"
 )
+
+func maskSettingsForResponse(settings domain.GlobalSettings) domain.GlobalSettings {
+	if settings.TelegramBotToken != "" {
+		settings.TelegramBotToken = rclone.MaskedSecret
+	}
+	return settings
+}
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.svc.GetSettings(r.Context())
@@ -19,7 +27,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "get settings failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settings)
+	writeJSON(w, http.StatusOK, maskSettingsForResponse(settings))
 }
 
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -38,18 +46,21 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "update settings failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, maskSettingsForResponse(updated))
 }
 
 func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		WebhookURL string `json:"webhook_url"`
+		WebhookURL       string `json:"webhook_url"`
+		WebhookType      string `json:"webhook_type"`
+		TelegramBotToken string `json:"telegram_bot_token"`
+		TelegramChatID   string `json:"telegram_chat_id"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
 		return
 	}
-	if err := s.svc.TestWebhook(r.Context(), body.WebhookURL); errors.Is(err, service.ErrValidation) {
+	if err := s.svc.TestWebhookSettings(r.Context(), body.WebhookURL, body.WebhookType, body.TelegramBotToken, body.TelegramChatID); errors.Is(err, service.ErrValidation) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	} else if err != nil {

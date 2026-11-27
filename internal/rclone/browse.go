@@ -375,6 +375,47 @@ func (c *Client) CleanupRemote(ctx context.Context, name string) error {
 	return nil
 }
 
+// DedupeRemote deduplicates identically named files on backends such as Google Drive.
+func (c *Client) DedupeRemote(ctx context.Context, name, subpath, mode string, dryRun bool) (DedupeResult, error) {
+	if err := c.ensureRemoteExists(ctx, name); err != nil {
+		return DedupeResult{}, err
+	}
+	cleanMode := strings.ToLower(strings.TrimSpace(mode))
+	if cleanMode == "" {
+		cleanMode = "newest"
+	}
+	switch cleanMode {
+	case "newest", "oldest", "largest", "smallest", "rename", "skip":
+	default:
+		return DedupeResult{}, fmt.Errorf("invalid dedupe mode %q", mode)
+	}
+	target, err := FormatRemoteTarget(name, subpath)
+	if err != nil {
+		return DedupeResult{}, err
+	}
+
+	args := []string{"--config", c.confPath, "dedupe", "--dedupe-mode", cleanMode}
+	if dryRun {
+		args = append(args, "--dry-run")
+	}
+	args = append(args, target)
+
+	dCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(dCtx, c.bin, args...).CombinedOutput()
+	trimmedOut := strings.TrimSpace(string(out))
+	if err != nil {
+		return DedupeResult{}, fmt.Errorf("dedupe failed: %s", firstNonEmpty(trimmedOut, err.Error()))
+	}
+	return DedupeResult{
+		Remote: name,
+		Mode:   cleanMode,
+		DryRun: dryRun,
+		Output: trimmedOut,
+	}, nil
+}
+
 // EnsureRemoteExists verifies that the named remote exists in rclone.conf.
 func (c *Client) EnsureRemoteExists(ctx context.Context, name string) error {
 	return c.ensureRemoteExists(ctx, name)

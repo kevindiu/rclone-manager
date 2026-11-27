@@ -1,11 +1,24 @@
-import { Check, ChevronDown, ChevronRight, Copy, KeyRound, Loader2, Search } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FolderSearch,
+  KeyRound,
+  Layers,
+  Loader2,
+  Plus,
+  Search,
+} from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
 import type { ProviderInfo, ProviderOption, RemoteInfo } from '../../types/api';
+import { PathPickerModal } from '../jobs/PathPickerModal';
 
 interface RemoteModalProps {
   providers: ProviderInfo[];
+  remotes: RemoteInfo[];
   existing?: RemoteInfo | null;
   onSaved: () => void;
   onClose: () => void;
@@ -19,11 +32,27 @@ const POPULAR_PROVIDERS = [
   { name: 'b2', label: 'Backblaze B2 Native' },
   { name: 'sftp', label: 'SFTP / SSH' },
   { name: 'webdav', label: 'WebDAV' },
-  { name: 'crypt', label: 'Crypt (Encryption)' },
-  { name: 'alias', label: 'Alias / Local Folder' },
 ];
 
-export function RemoteModal({ providers, existing, onSaved, onClose }: RemoteModalProps) {
+const WRAPPER_PROVIDERS = [
+  { name: 'crypt', label: 'Crypt (Encryption)' },
+  { name: 'alias', label: 'Alias (Remote / Folder Shortcut)' },
+  { name: 'union', label: 'Union (Merge Multiple Remotes)' },
+  { name: 'combine', label: 'Combine (Mount Remotes as Folders)' },
+  { name: 'chunker', label: 'Chunker (Split Large Files)' },
+  { name: 'compress', label: 'Compress (Gzip / Zstd)' },
+];
+
+const SINGLE_REMOTE_PROVIDERS = new Set([
+  'crypt',
+  'alias',
+  'chunker',
+  'compress',
+  'hasher',
+  'cache',
+]);
+
+export function RemoteModal({ providers, remotes, existing, onSaved, onClose }: RemoteModalProps) {
   const isEdit = Boolean(existing);
   const [name, setName] = useState(existing?.name ?? '');
   const [selectedType, setSelectedType] = useState(existing?.type ?? '');
@@ -40,6 +69,16 @@ export function RemoteModal({ providers, existing, onSaved, onClose }: RemoteMod
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [copiedCmd, setCopiedCmd] = useState(false);
+  const [pickerOpt, setPickerOpt] = useState<{
+    optName: string;
+    mode: 'replace' | 'append-union' | 'append-combine';
+  } | null>(null);
+  const [quickUpstreamRemote, setQuickUpstreamRemote] = useState('');
+
+  const selectableRemotes = useMemo(
+    () => remotes.filter((r) => !existing || r.name !== existing.name),
+    [remotes, existing]
+  );
 
   const activeProvider = useMemo(
     () => providers.find((p) => p.Name === selectedType),
@@ -127,10 +166,181 @@ export function RemoteModal({ providers, existing, onSaved, onClose }: RemoteMod
     }
   };
 
+  const isSingleRemoteOption = (opt: ProviderOption) =>
+    opt.Name === 'remote' &&
+    (SINGLE_REMOTE_PROVIDERS.has(selectedType) ||
+      opt.Help.toLowerCase().includes('remote:path') ||
+      opt.Help.toLowerCase().includes('remote to'));
+
+  const isMultiUpstreamOption = (opt: ProviderOption) =>
+    (selectedType === 'union' || selectedType === 'combine') && opt.Name === 'upstreams';
+
+  const appendUpstreamToken = (optName: string, pickedPath: string, isCombine: boolean) => {
+    const clean = pickedPath.trim();
+    if (!clean) return;
+    let token = clean;
+    if (isCombine) {
+      const baseName = clean.includes(':')
+        ? clean.split(':')[0] || 'remote'
+        : clean.split('/').filter(Boolean).pop() || 'local';
+      token = `${baseName}=${clean}`;
+    } else if (clean.includes(' ') && !clean.startsWith('"')) {
+      token = `"${clean}"`;
+    }
+    setValues((prev) => {
+      const cur = (prev[optName] ?? '').trim();
+      return { ...prev, [optName]: cur ? `${cur} ${token}` : token };
+    });
+  };
+
   const renderOptionInput = (opt: ProviderOption) => {
     const val = values[opt.Name] ?? '';
     const isSecret = opt.IsPassword || opt.Sensitive;
     const relevantExamples = (opt.Examples ?? []).filter((ex) => matchesSubProvider(ex.Provider));
+
+    if (isSingleRemoteOption(opt)) {
+      const parsedRemoteName = val.includes(':') && !val.startsWith('/') ? val.split(':')[0] : '';
+      const existingSubpath =
+        val.includes(':') && !val.startsWith('/') ? val.split(':').slice(1).join(':') : '';
+      const selectedKnownRemote = selectableRemotes.some((r) => r.name === parsedRemoteName)
+        ? parsedRemoteName
+        : '';
+
+      return (
+        <div key={opt.Name} className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-mono font-medium text-slate-200">
+              {opt.Name} {opt.Required && <span className="text-rose-400">*</span>}
+            </label>
+            <span className="text-[11px] text-slate-400">
+              Pick an existing remote or browse folder
+            </span>
+          </div>
+
+          <div className="flex flex-wrap sm:flex-nowrap gap-2">
+            <select
+              aria-label={`Select source remote for ${opt.Name}`}
+              value={selectedKnownRemote}
+              onChange={(e) => {
+                const picked = e.target.value;
+                if (!picked) return;
+                const nextVal = existingSubpath ? `${picked}:${existingSubpath}` : `${picked}:`;
+                setValues((prev) => ({ ...prev, [opt.Name]: nextVal }));
+              }}
+              className="flex-1 min-w-[180px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
+            >
+              <option value="">
+                {selectableRemotes.length > 0
+                  ? '-- Select an existing remote (or browse / type below) --'
+                  : '-- No existing remotes yet (browse local or type below) --'}
+              </option>
+              {selectableRemotes.map((r) => (
+                <option key={r.name} value={r.name}>
+                  {r.name} ({r.type})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setPickerOpt({ optName: opt.Name, mode: 'replace' })}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 shrink-0"
+            >
+              <FolderSearch className="w-4 h-4 text-sky-400" />
+              Browse
+            </button>
+          </div>
+
+          <input
+            type="text"
+            required={opt.Required && !isEdit}
+            value={val}
+            onChange={(e) => setValues((prev) => ({ ...prev, [opt.Name]: e.target.value }))}
+            placeholder={opt.DefaultStr || 'e.g. gdrive:encrypted or /data/folder'}
+            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+          />
+          {opt.Help && (
+            <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">
+              {opt.Help.split('\n')[0]}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    if (isMultiUpstreamOption(opt)) {
+      const isCombine = selectedType === 'combine';
+      return (
+        <div key={opt.Name} className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-mono font-medium text-slate-200">
+              {opt.Name} {opt.Required && <span className="text-rose-400">*</span>}
+            </label>
+            <span className="text-[11px] text-slate-400">
+              Add multiple remotes (space-separated)
+            </span>
+          </div>
+
+          <div className="flex flex-wrap sm:flex-nowrap gap-2">
+            <select
+              aria-label="Pick remote to add to upstreams"
+              value={quickUpstreamRemote}
+              onChange={(e) => setQuickUpstreamRemote(e.target.value)}
+              className="flex-1 min-w-[160px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
+            >
+              <option value="">-- Pick remote to append --</option>
+              {selectableRemotes.map((r) => (
+                <option key={r.name} value={r.name}>
+                  {r.name} ({r.type})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!quickUpstreamRemote}
+              onClick={() => {
+                appendUpstreamToken(opt.Name, `${quickUpstreamRemote}:`, isCombine);
+                setQuickUpstreamRemote('');
+              }}
+              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-xs font-medium text-sky-300 border border-sky-500/30 disabled:opacity-40 shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setPickerOpt({
+                  optName: opt.Name,
+                  mode: isCombine ? 'append-combine' : 'append-union',
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 shrink-0"
+            >
+              <FolderSearch className="w-4 h-4 text-sky-400" />
+              Browse
+            </button>
+          </div>
+
+          <input
+            type="text"
+            required={opt.Required && !isEdit}
+            value={val}
+            onChange={(e) => setValues((prev) => ({ ...prev, [opt.Name]: e.target.value }))}
+            placeholder={
+              isCombine
+                ? 'e.g. gdrive=gdrive: onedrive=onedrive:'
+                : 'e.g. remoteA:folder remoteB:folder'
+            }
+            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+          />
+          {opt.Help && (
+            <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">
+              {opt.Help.split('\n')[0]}
+            </p>
+          )}
+        </div>
+      );
+    }
 
     if (opt.Type === 'bool') {
       const checked = val ? val === 'true' : opt.DefaultStr === 'true';
@@ -265,6 +475,26 @@ export function RemoteModal({ providers, existing, onSaved, onClose }: RemoteMod
                 >
                   <div className="text-xs font-semibold text-slate-100">{p.label}</div>
                   <div className="text-[11px] font-mono text-sky-400 mt-0.5">{p.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-2">
+              <Layers className="w-3.5 h-3.5" />
+              Wrapper / Overlay Types (Wrap Existing Remotes)
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {WRAPPER_PROVIDERS.map((p) => (
+                <button
+                  key={p.name}
+                  type="button"
+                  onClick={() => setSelectedType(p.name)}
+                  className="p-2.5 rounded-xl bg-slate-950 border border-emerald-500/20 hover:border-emerald-500/60 text-left transition-colors"
+                >
+                  <div className="text-xs font-semibold text-slate-100">{p.label}</div>
+                  <div className="text-[11px] font-mono text-emerald-400 mt-0.5">{p.name}</div>
                 </button>
               ))}
             </div>
@@ -424,6 +654,20 @@ export function RemoteModal({ providers, existing, onSaved, onClose }: RemoteMod
             </div>
           )}
         </form>
+      )}
+      {pickerOpt && (
+        <PathPickerModal
+          remotes={selectableRemotes}
+          initialValue={pickerOpt.mode === 'replace' ? (values[pickerOpt.optName] ?? '') : ''}
+          onSelect={(picked) => {
+            if (pickerOpt.mode === 'replace') {
+              setValues((prev) => ({ ...prev, [pickerOpt.optName]: picked }));
+            } else {
+              appendUpstreamToken(pickerOpt.optName, picked, pickerOpt.mode === 'append-combine');
+            }
+          }}
+          onClose={() => setPickerOpt(null)}
+        />
       )}
     </Modal>
   );

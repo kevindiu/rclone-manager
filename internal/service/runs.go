@@ -18,6 +18,16 @@ func (s *AppService) ListRuns(ctx context.Context, jobID, status, trigger string
 	return s.store.ListRuns(ctx, jobID, status, trigger, limit, offset)
 }
 
+// GetDailyRunStats returns aggregated per-day run metrics for dashboard charts.
+func (s *AppService) GetDailyRunStats(ctx context.Context, days int) ([]domain.DailyRunStat, error) {
+	return s.store.GetDailyRunStats(ctx, days)
+}
+
+// ClearFinishedRuns deletes non-active job runs matching optional filters and removes their log files.
+func (s *AppService) ClearFinishedRuns(ctx context.Context, jobID, status, trigger string) (int64, error) {
+	return s.store.DeleteFinishedRuns(ctx, jobID, status, trigger)
+}
+
 // GetRun returns a single job run.
 func (s *AppService) GetRun(ctx context.Context, id string) (*domain.JobRun, error) {
 	return s.store.GetRun(ctx, id)

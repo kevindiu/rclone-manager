@@ -1,4 +1,5 @@
 import { ArrowUpDown, FolderSearch } from 'lucide-react';
+import type { Job } from '../../types/api';
 
 export function JobBasicsTab({
   name,
@@ -7,6 +8,8 @@ export function JobBasicsTab({
   setDescription,
   operation,
   setOperation,
+  bisyncConflictResolve,
+  setBisyncConflictResolve,
   source,
   setSource,
   destination,
@@ -19,8 +22,10 @@ export function JobBasicsTab({
   setName: (v: string) => void;
   description: string;
   setDescription: (v: string) => void;
-  operation: 'copy' | 'sync' | 'move' | 'check';
-  setOperation: (v: 'copy' | 'sync' | 'move' | 'check') => void;
+  operation: Job['operation'];
+  setOperation: (v: Job['operation']) => void;
+  bisyncConflictResolve: NonNullable<Job['bisync_conflict_resolve']>;
+  setBisyncConflictResolve: (v: NonNullable<Job['bisync_conflict_resolve']>) => void;
   source: string;
   setSource: (v: string) => void;
   destination: string;
@@ -127,6 +132,27 @@ export function JobBasicsTab({
               Verifies hashes and sizes between Source and Destination without modifying any files.
             </p>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setOperation('bisync')}
+            className={`sm:col-span-2 p-3 rounded-xl border text-left transition-colors ${
+              operation === 'bisync'
+                ? 'bg-violet-500/10 border-violet-500/60 text-slate-100'
+                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold">Bisync (Two-Way Sync)</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/20 text-violet-300">
+                Bidirectional
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+              Keeps both Source and Destination in sync in both directions. Supports conflict
+              resolution and propagates edits &amp; deletions both ways.
+            </p>
+          </button>
         </div>
         {operation === 'sync' && (
           <p className="text-[11px] text-amber-300/90 mt-1.5">
@@ -142,6 +168,41 @@ export function JobBasicsTab({
           <p className="text-[11px] text-sky-300/90 mt-1.5">
             Note: Any missing or mismatched files fail the run and appear in run logs.
           </p>
+        )}
+        {operation === 'bisync' && (
+          <div className="mt-2.5 p-3 rounded-xl bg-violet-500/10 border border-violet-500/30 space-y-2.5">
+            <p className="text-[11px] text-violet-200 leading-relaxed">
+              First run (or after changing paths/filters) requires running <strong>Resync</strong>{' '}
+              from the Jobs list to build initial bisync state.
+            </p>
+            <div>
+              <label
+                htmlFor="job-bisync-conflict"
+                className="block text-xs font-medium text-slate-200 mb-1"
+              >
+                Conflict Resolution (<code>--conflict-resolve</code>)
+              </label>
+              <select
+                id="job-bisync-conflict"
+                value={bisyncConflictResolve}
+                onChange={(e) =>
+                  setBisyncConflictResolve(
+                    e.target.value as NonNullable<Job['bisync_conflict_resolve']>
+                  )
+                }
+                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-violet-500"
+              >
+                <option value="">Default (none — fail / rename on conflict)</option>
+                <option value="newer">newer (keep most recently modified)</option>
+                <option value="older">older (keep oldest)</option>
+                <option value="larger">larger (keep largest file)</option>
+                <option value="smaller">smaller (keep smallest file)</option>
+                <option value="path1">path1 (always prefer Source)</option>
+                <option value="path2">path2 (always prefer Destination)</option>
+                <option value="none">none (fail run on conflict)</option>
+              </select>
+            </div>
+          </div>
         )}
       </div>
 

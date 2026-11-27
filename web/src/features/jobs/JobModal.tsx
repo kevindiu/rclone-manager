@@ -1,5 +1,5 @@
-import { Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Check, Copy, Loader2, Terminal } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
 import type { GlobalSettings, Job, RemoteInfo } from '../../types/api';
@@ -32,9 +32,10 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
   const [name, setName] = useState(job?.name ?? '');
   const [description, setDescription] = useState(job?.description ?? '');
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
-  const [operation, setOperation] = useState<'copy' | 'sync' | 'move' | 'check'>(
-    job?.operation ?? 'sync'
-  );
+  const [operation, setOperation] = useState<Job['operation']>(job?.operation ?? 'sync');
+  const [bisyncConflictResolve, setBisyncConflictResolve] = useState<
+    NonNullable<Job['bisync_conflict_resolve']>
+  >(job?.bisync_conflict_resolve ?? '');
   const [source, setSource] = useState(job?.source ?? '');
   const [destination, setDestination] = useState(job?.destination ?? '');
   const [schedule, setSchedule] = useState(job?.schedule ?? '');
@@ -49,6 +50,10 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
   const [excludesText, setExcludesText] = useState((job?.exclude_patterns ?? []).join('\n'));
   const [includesText, setIncludesText] = useState((job?.include_patterns ?? []).join('\n'));
   const [filtersText, setFiltersText] = useState((job?.filter_rules ?? []).join('\n'));
+  const [minAge, setMinAge] = useState(job?.min_age ?? '');
+  const [maxAge, setMaxAge] = useState(job?.max_age ?? '');
+  const [minSize, setMinSize] = useState(job?.min_size ?? '');
+  const [maxSize, setMaxSize] = useState(job?.max_size ?? '');
   const [maxTransfer, setMaxTransfer] = useState(job?.max_transfer ?? '');
   const [cutoffMode, setCutoffMode] = useState<'soft' | 'hard' | 'cautious' | ''>(
     job?.cutoff_mode ?? 'soft'
@@ -83,9 +88,26 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
   const [serverSideAcrossConfigs, setServerSideAcrossConfigs] = useState(
     job?.server_side_across_configs ?? false
   );
+  const [deleteTiming, setDeleteTiming] = useState<NonNullable<Job['delete_timing']>>(
+    job?.delete_timing ?? ''
+  );
+  const [deleteEmptySrcDirs, setDeleteEmptySrcDirs] = useState(job?.delete_empty_src_dirs ?? false);
+  const [symlinkMode, setSymlinkMode] = useState<NonNullable<Job['symlink_mode']>>(
+    job?.symlink_mode ?? ''
+  );
+  const [sizeOnly, setSizeOnly] = useState(job?.size_only ?? false);
+  const [ignoreExisting, setIgnoreExisting] = useState(job?.ignore_existing ?? false);
+  const [notifyOverride, setNotifyOverride] = useState<NonNullable<Job['notify_override']>>(
+    job?.notify_override ?? ''
+  );
 
   const [cronPreview, setCronPreview] = useState<string[]>([]);
   const [cronError, setCronError] = useState('');
+  const [previewDryRun, setPreviewDryRun] = useState(false);
+  const [previewResync, setPreviewResync] = useState(false);
+  const [previewCmd, setPreviewCmd] = useState('');
+  const [previewErr, setPreviewErr] = useState('');
+  const [copiedCmd, setCopiedCmd] = useState(false);
 
   useEffect(() => {
     const trimmed = schedule.trim();
@@ -109,18 +131,140 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
     return () => window.clearTimeout(timer);
   }, [schedule, settings.timezone]);
 
-  const splitLines = (txt: string) =>
-    txt
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const splitLines = useCallback(
+    (txt: string) =>
+      txt
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    []
+  );
 
-  const parseOptInt = (v: string): number | null => {
+  const parseOptInt = useCallback((v: string): number | null => {
     const trimmed = v.trim();
     if (!trimmed) return null;
     const n = Number(trimmed);
     return Number.isFinite(n) ? Math.trunc(n) : null;
-  };
+  }, []);
+
+  const buildPayload = useCallback(
+    (): Partial<Job> => ({
+      name: name.trim() || 'Preview Job',
+      description: description.trim(),
+      enabled,
+      operation,
+      source: source.trim(),
+      destination: destination.trim(),
+      schedule: schedule.trim(),
+      exclude_patterns: splitLines(excludesText),
+      include_patterns: splitLines(includesText),
+      filter_rules: splitLines(filtersText),
+      min_age: minAge.trim(),
+      max_age: maxAge.trim(),
+      min_size: minSize.trim(),
+      max_size: maxSize.trim(),
+      custom_flags: customFlags.trim(),
+      max_transfer: maxTransfer.trim(),
+      cutoff_mode: maxTransfer.trim() ? cutoffMode || 'soft' : '',
+      versioning_enabled: versioningEnabled,
+      backup_dir_base: backupDirBase.trim(),
+      version_format: versionFormat.trim() || '2006-01-02',
+      version_retention_days: Math.max(0, Number(versionRetentionDays) || 0),
+      abort_if_source_empty: abortIfSourceEmpty,
+      required_marker_file: requiredMarkerFile.trim(),
+      max_delete: parseOptInt(maxDelete),
+      transfers: parseOptInt(transfers),
+      checkers: parseOptInt(checkers),
+      bwlimit: bwlimit.trim(),
+      retries: parseOptInt(retries),
+      low_level_retries: parseOptInt(lowLevelRetries),
+      timeout: timeout.trim(),
+      contimeout: contimeout.trim(),
+      fast_list: fastList,
+      checksum,
+      update_only: updateOnly,
+      server_side_across_configs: serverSideAcrossConfigs,
+      delete_timing: operation === 'sync' ? deleteTiming : '',
+      delete_empty_src_dirs: operation === 'move' ? deleteEmptySrcDirs : false,
+      symlink_mode: symlinkMode,
+      size_only: sizeOnly,
+      ignore_existing: ignoreExisting,
+      bisync_conflict_resolve: operation === 'bisync' ? bisyncConflictResolve : '',
+      notify_override: notifyOverride,
+    }),
+    [
+      abortIfSourceEmpty,
+      backupDirBase,
+      bisyncConflictResolve,
+      bwlimit,
+      checkers,
+      checksum,
+      contimeout,
+      customFlags,
+      cutoffMode,
+      deleteEmptySrcDirs,
+      deleteTiming,
+      description,
+      destination,
+      enabled,
+      excludesText,
+      fastList,
+      filtersText,
+      ignoreExisting,
+      includesText,
+      lowLevelRetries,
+      maxAge,
+      maxDelete,
+      maxSize,
+      maxTransfer,
+      minAge,
+      minSize,
+      name,
+      notifyOverride,
+      operation,
+      parseOptInt,
+      requiredMarkerFile,
+      retries,
+      schedule,
+      serverSideAcrossConfigs,
+      sizeOnly,
+      source,
+      splitLines,
+      symlinkMode,
+      timeout,
+      transfers,
+      updateOnly,
+      versionFormat,
+      versionRetentionDays,
+      versioningEnabled,
+    ]
+  );
+
+  useEffect(() => {
+    if (!source.trim() || !destination.trim()) {
+      setPreviewCmd('');
+      setPreviewErr('');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const payload = buildPayload();
+      api
+        .previewJobCommand(
+          { ...payload, schedule: '' },
+          previewDryRun,
+          operation === 'bisync' && previewResync
+        )
+        .then((res) => {
+          setPreviewCmd(res.command);
+          setPreviewErr('');
+        })
+        .catch((err) => {
+          setPreviewCmd('');
+          setPreviewErr(err instanceof Error ? err.message : 'Unable to preview command');
+        });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [buildPayload, destination, operation, previewDryRun, previewResync, source]);
 
   const derivedDefaultBackupDir = () => {
     const d = destination.trim();
@@ -156,37 +300,8 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
     setError('');
     try {
       const payload: Partial<Job> = {
+        ...buildPayload(),
         name: name.trim(),
-        description: description.trim(),
-        enabled,
-        operation,
-        source: source.trim(),
-        destination: destination.trim(),
-        schedule: schedule.trim(),
-        exclude_patterns: splitLines(excludesText),
-        include_patterns: splitLines(includesText),
-        filter_rules: splitLines(filtersText),
-        custom_flags: customFlags.trim(),
-        max_transfer: maxTransfer.trim(),
-        cutoff_mode: maxTransfer.trim() ? cutoffMode || 'soft' : '',
-        versioning_enabled: versioningEnabled,
-        backup_dir_base: backupDirBase.trim(),
-        version_format: versionFormat.trim() || '2006-01-02',
-        version_retention_days: Math.max(0, Number(versionRetentionDays) || 0),
-        abort_if_source_empty: abortIfSourceEmpty,
-        required_marker_file: requiredMarkerFile.trim(),
-        max_delete: parseOptInt(maxDelete),
-        transfers: parseOptInt(transfers),
-        checkers: parseOptInt(checkers),
-        bwlimit: bwlimit.trim(),
-        retries: parseOptInt(retries),
-        low_level_retries: parseOptInt(lowLevelRetries),
-        timeout: timeout.trim(),
-        contimeout: contimeout.trim(),
-        fast_list: fastList,
-        checksum,
-        update_only: updateOnly,
-        server_side_across_configs: serverSideAcrossConfigs,
       };
 
       if (isEdit && job?.id) {
@@ -208,6 +323,10 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
     requiredMarkerFile.trim() !== '' ||
     maxDelete.trim() !== '' ||
     maxTransfer.trim() !== '' ||
+    minAge.trim() !== '' ||
+    maxAge.trim() !== '' ||
+    minSize.trim() !== '' ||
+    maxSize.trim() !== '' ||
     excludesText.trim() !== '' ||
     includesText.trim() !== '' ||
     filtersText.trim() !== '';
@@ -224,7 +343,13 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
     fastList ||
     checksum ||
     updateOnly ||
-    serverSideAcrossConfigs;
+    serverSideAcrossConfigs ||
+    deleteTiming !== '' ||
+    deleteEmptySrcDirs ||
+    symlinkMode !== '' ||
+    sizeOnly ||
+    ignoreExisting ||
+    notifyOverride !== '';
 
   const tabs: { key: TabKey; label: string; activeDot?: boolean }[] = [
     { key: 'basics', label: 'Basics' },
@@ -295,6 +420,8 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
               setDescription={setDescription}
               operation={operation}
               setOperation={setOperation}
+              bisyncConflictResolve={bisyncConflictResolve}
+              setBisyncConflictResolve={setBisyncConflictResolve}
               source={source}
               setSource={setSource}
               destination={destination}
@@ -342,6 +469,14 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
               setMaxTransfer={setMaxTransfer}
               cutoffMode={cutoffMode}
               setCutoffMode={setCutoffMode}
+              minAge={minAge}
+              setMinAge={setMinAge}
+              maxAge={maxAge}
+              setMaxAge={setMaxAge}
+              minSize={minSize}
+              setMinSize={setMinSize}
+              maxSize={maxSize}
+              setMaxSize={setMaxSize}
               excludesText={excludesText}
               setExcludesText={setExcludesText}
               includesText={includesText}
@@ -353,6 +488,7 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
 
           {tab === 'overrides' && (
             <JobOverridesTab
+              operation={operation}
               settings={settings}
               transfers={transfers}
               setTransfers={setTransfers}
@@ -378,7 +514,77 @@ export function JobModal({ job, settings, remotes, onSaved, onClose }: JobModalP
               setUpdateOnly={setUpdateOnly}
               serverSideAcrossConfigs={serverSideAcrossConfigs}
               setServerSideAcrossConfigs={setServerSideAcrossConfigs}
+              deleteTiming={deleteTiming}
+              setDeleteTiming={setDeleteTiming}
+              deleteEmptySrcDirs={deleteEmptySrcDirs}
+              setDeleteEmptySrcDirs={setDeleteEmptySrcDirs}
+              symlinkMode={symlinkMode}
+              setSymlinkMode={setSymlinkMode}
+              sizeOnly={sizeOnly}
+              setSizeOnly={setSizeOnly}
+              ignoreExisting={ignoreExisting}
+              setIgnoreExisting={setIgnoreExisting}
+              notifyOverride={notifyOverride}
+              setNotifyOverride={setNotifyOverride}
             />
+          )}
+
+          {(previewCmd || previewErr) && (
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-slate-300">
+                  <Terminal className="w-3.5 h-3.5 text-sky-400" />
+                  Command Preview
+                </span>
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-1.5 text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={previewDryRun}
+                      onChange={(e) => setPreviewDryRun(e.target.checked)}
+                      className="rounded accent-violet-500"
+                    />
+                    Dry Run
+                  </label>
+                  {operation === 'bisync' && (
+                    <label className="inline-flex items-center gap-1.5 text-slate-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={previewResync}
+                        onChange={(e) => setPreviewResync(e.target.checked)}
+                        className="rounded accent-violet-500"
+                      />
+                      Resync
+                    </label>
+                  )}
+                  {previewCmd && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(previewCmd);
+                        setCopiedCmd(true);
+                        window.setTimeout(() => setCopiedCmd(false), 1500);
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200"
+                    >
+                      {copiedCmd ? (
+                        <Check className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      {copiedCmd ? 'Copied' : 'Copy'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {previewErr ? (
+                <p className="text-xs text-rose-300 font-mono">{previewErr}</p>
+              ) : (
+                <pre className="text-[11px] font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+                  {previewCmd}
+                </pre>
+              )}
+            </div>
           )}
         </form>
       </Modal>

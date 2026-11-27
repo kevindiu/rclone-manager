@@ -55,9 +55,18 @@ type AuthStore interface {
 	UpdateUserPassword(ctx context.Context, userID, passwordHash string) error
 	CreateSession(ctx context.Context, session domain.Session) error
 	GetSessionWithUser(ctx context.Context, tokenHash string) (*domain.Session, *domain.User, error)
+	ListUserSessions(ctx context.Context, userID string) ([]domain.Session, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteUserSessionsExcept(ctx context.Context, userID, keepTokenHash string) error
 	PruneExpiredSessions(ctx context.Context) (int64, error)
+}
+
+// SessionInfo describes an active session safely for UI display without exposing token hashes.
+type SessionInfo struct {
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Current   bool      `json:"current"`
 }
 
 // AuthStatus describes current session state and whether initial setup is needed.
@@ -300,6 +309,33 @@ func (a *AuthService) ChangePassword(ctx context.Context, userID, currentTokenHa
 // PruneExpiredSessions removes expired sessions from persistence.
 func (a *AuthService) PruneExpiredSessions(ctx context.Context) (int64, error) {
 	return a.store.PruneExpiredSessions(ctx)
+}
+
+// ListSessions lists active sessions for userID, marking the caller's session as current.
+func (a *AuthService) ListSessions(ctx context.Context, userID, currentTokenHash string) ([]SessionInfo, error) {
+	sessions, err := a.store.ListUserSessions(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		id := s.TokenHash
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		out = append(out, SessionInfo{
+			ID:        id,
+			CreatedAt: s.CreatedAt,
+			ExpiresAt: s.ExpiresAt,
+			Current:   s.TokenHash == currentTokenHash,
+		})
+	}
+	return out, nil
+}
+
+// RevokeOtherSessions signs out every active session for userID except the current session.
+func (a *AuthService) RevokeOtherSessions(ctx context.Context, userID, currentTokenHash string) error {
+	return a.store.DeleteUserSessionsExcept(ctx, userID, currentTokenHash)
 }
 
 // ResetPassword resets an administrator password (defaulting to the earliest user

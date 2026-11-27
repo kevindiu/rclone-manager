@@ -229,6 +229,10 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 		r.mu.Unlock()
 	}()
 
+	finish := func(status, errMsg string) {
+		r.finishRun(&run, status, errMsg, job.NotifyOverride)
+	}
+
 	settings, err := r.store.GetSettings(ctx, r.defaults)
 	if err != nil {
 		settings = r.defaults
@@ -236,18 +240,18 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 	r.gate.setLimit(settings.MaxConcurrentJobs)
 
 	if err := r.gate.acquire(ctx); err != nil {
-		r.finishRun(&run, "cancelled", "Cancelled while queued")
+		finish("cancelled", "Cancelled while queued")
 		return
 	}
 	defer r.gate.release()
 
 	if err := os.MkdirAll(r.logDir, 0o755); err != nil {
-		r.finishRun(&run, "failed", fmt.Sprintf("Failed to create log dir: %v", err))
+		finish("failed", fmt.Sprintf("Failed to create log dir: %v", err))
 		return
 	}
 	logFile, err := os.OpenFile(run.LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		r.finishRun(&run, "failed", fmt.Sprintf("Failed to open log file: %v", err))
+		finish("failed", fmt.Sprintf("Failed to open log file: %v", err))
 		return
 	}
 	defer func() {
@@ -282,13 +286,13 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 		nonEmpty, err := r.client.CheckSourceNotEmpty(ctx, job.Source)
 		if err != nil {
 			writeLog("error", "Pre-flight check failed: "+err.Error())
-			r.finishRun(&run, "failed", "Pre-flight source check failed: "+err.Error())
+			finish("failed", "Pre-flight source check failed: "+err.Error())
 			return
 		}
 		if !nonEmpty {
 			msg := "Pre-flight guard aborted run: source directory is empty"
 			writeLog("error", msg)
-			r.finishRun(&run, "failed", msg)
+			finish("failed", msg)
 			return
 		}
 	}
@@ -302,7 +306,7 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 				msg += " (" + err.Error() + ")"
 			}
 			writeLog("error", msg)
-			r.finishRun(&run, "failed", msg)
+			finish("failed", msg)
 			return
 		}
 	}
@@ -315,12 +319,12 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 	args, backupBase, datedBackupDir, err := BuildRcloneArgs(job, settings, r.client.ConfPath(), run.DryRun, time.Now().In(loc))
 	if err != nil {
 		writeLog("error", "Failed to build rclone command: "+err.Error())
-		r.finishRun(&run, "failed", err.Error())
+		finish("failed", err.Error())
 		return
 	}
 
 	run.BackupDirUsed = datedBackupDir
-	run.CommandPreview = r.client.Bin() + " " + formatCommandPreview(args)
+	run.CommandPreview = r.client.Bin() + " " + FormatCommandPreview(args)
 	if err := r.store.UpdateRun(context.Background(), run); err != nil {
 		r.logger.Warn("failed to update run command preview", "run_id", run.ID, "error", err)
 	}
@@ -329,7 +333,7 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		writeLog("error", "Pipe creation failed: "+err.Error())
-		r.finishRun(&run, "failed", err.Error())
+		finish("failed", err.Error())
 		return
 	}
 
@@ -348,7 +352,7 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 		_ = pw.Close()
 		_ = pr.Close()
 		writeLog("error", "Failed to start rclone: "+err.Error())
-		r.finishRun(&run, "failed", "Failed to start rclone: "+err.Error())
+		finish("failed", "Failed to start rclone: "+err.Error())
 		return
 	}
 	_ = pw.Close()
@@ -396,7 +400,7 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 
 	if wasStopped || ctx.Err() != nil {
 		writeLog("warning", "Job run was stopped by user or shutdown")
-		r.finishRun(&run, "cancelled", "Stopped by user")
+		finish("cancelled", "Stopped by user")
 		return
 	}
 
@@ -406,7 +410,7 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 			errMsg = waitErr.Error()
 		}
 		writeLog("error", "rclone exited with error: "+errMsg)
-		r.finishRun(&run, "failed", errMsg)
+		finish("failed", errMsg)
 		return
 	}
 
@@ -423,10 +427,10 @@ func (r *Runner) execute(ctx context.Context, job domain.Job, run domain.JobRun,
 	}
 
 	writeLog("info", "Job run completed successfully")
-	r.finishRun(&run, "success", "")
+	finish("success", "")
 }
 
-func (r *Runner) finishRun(run *domain.JobRun, status, errMsg string) {
+func (r *Runner) finishRun(run *domain.JobRun, status, errMsg, notifyOverride string) {
 	now := time.Now().UTC()
 	run.Status = status
 	run.FinishedAt = &now
@@ -447,6 +451,7 @@ func (r *Runner) finishRun(run *domain.JobRun, status, errMsg string) {
 		if err != nil {
 			settings = r.defaults
 		}
+		settings.WebhookOn = notify.EffectiveWebhookOn(settings.WebhookOn, notifyOverride)
 		if settings.WebhookURL != "" && notify.ShouldNotify(settings.WebhookOn, status) {
 			runCopy := *run
 			r.wg.Add(1)

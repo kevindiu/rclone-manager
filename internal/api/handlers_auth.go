@@ -193,3 +193,30 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password_updated"})
 }
+
+func (s *Server) handleAuthSessions(w http.ResponseWriter, r *http.Request) {
+	ac, ok := authFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	sessions, err := s.auth.ListSessions(r.Context(), ac.User.ID, ac.TokenHash)
+	if err != nil {
+		s.writeInternalError(w, r, "list sessions failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func (s *Server) handleAuthRevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+	ac, ok := authFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if err := s.auth.RevokeOtherSessions(r.Context(), ac.User.ID, ac.TokenHash); err != nil {
+		s.writeInternalError(w, r, "revoke other sessions failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}

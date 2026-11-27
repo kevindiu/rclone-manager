@@ -11,6 +11,9 @@ export interface GlobalSettings {
   max_concurrent_jobs: number;
   webhook_url?: string;
   webhook_on?: 'off' | 'failure' | 'always' | '';
+  webhook_type?: 'generic' | 'ntfy' | 'telegram' | '';
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
 }
 
 export interface Job {
@@ -18,7 +21,7 @@ export interface Job {
   name: string;
   description?: string;
   enabled: boolean;
-  operation: 'copy' | 'sync' | 'move' | 'check';
+  operation: 'copy' | 'sync' | 'move' | 'check' | 'bisync';
   source: string;
   destination: string;
   schedule?: string;
@@ -30,6 +33,25 @@ export interface Job {
   checksum?: boolean;
   update_only?: boolean;
   server_side_across_configs?: boolean;
+  delete_timing?: '' | 'during' | 'after' | 'before';
+  delete_empty_src_dirs?: boolean;
+  symlink_mode?: '' | 'links' | 'copy_links';
+  size_only?: boolean;
+  ignore_existing?: boolean;
+  min_age?: string;
+  max_age?: string;
+  min_size?: string;
+  max_size?: string;
+  bisync_conflict_resolve?:
+    | ''
+    | 'none'
+    | 'path1'
+    | 'path2'
+    | 'newer'
+    | 'older'
+    | 'larger'
+    | 'smaller';
+  notify_override?: '' | 'failure' | 'always' | 'off';
   max_transfer?: string;
   cutoff_mode?: 'soft' | 'hard' | 'cautious' | '';
   versioning_enabled: boolean;
@@ -227,4 +249,36 @@ export interface AuthStatus {
   authenticated: boolean;
   setup_required: boolean;
   user?: AuthUser;
+}
+
+export interface SessionInfo {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  current: boolean;
+}
+
+export interface DailyRunStat {
+  date: string;
+  success_count: number;
+  failed_count: number;
+  other_count: number;
+  bytes_transferred: number;
+}
+
+export interface DedupeResult {
+  remote: string;
+  mode: string;
+  dry_run: boolean;
+  output: string;
+}
+
+export interface BulkDeleteEntry {
+  path: string;
+  is_dir: boolean;
+}
+
+export interface BulkDeleteResponse {
+  deleted: number;
+  failed: { path: string; error: string }[];
 }

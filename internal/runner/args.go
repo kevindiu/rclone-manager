@@ -13,7 +13,7 @@ import (
 func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath string, dryRun bool, nowLocal time.Time) (args []string, backupBase string, datedBackupDir string, err error) {
 	op := job.Operation
 	switch op {
-	case "copy", "sync", "move", "check", "copyto":
+	case "copy", "sync", "move", "check", "bisync", "copyto":
 	default:
 		op = "sync"
 	}
@@ -98,7 +98,7 @@ func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath st
 		args = append(args, "--cutoff-mode="+cutoff)
 	}
 
-	if job.MaxDelete != nil && *job.MaxDelete >= 0 && op != "check" {
+	if job.MaxDelete != nil && *job.MaxDelete >= 0 && op != "check" && op != "bisync" {
 		args = append(args, "--max-delete", strconv.Itoa(*job.MaxDelete))
 	}
 
@@ -108,15 +108,56 @@ func BuildRcloneArgs(job domain.Job, settings domain.GlobalSettings, confPath st
 	if job.Checksum {
 		args = append(args, "--checksum")
 	}
-	if job.UpdateOnly && op != "check" {
+	if job.UpdateOnly && op != "check" && op != "bisync" {
 		args = append(args, "--update")
+	}
+	if job.IgnoreExisting && op != "check" && op != "bisync" {
+		args = append(args, "--ignore-existing")
+	}
+	if job.SizeOnly {
+		args = append(args, "--size-only")
+	}
+	switch job.SymlinkMode {
+	case "links":
+		args = append(args, "--links")
+	case "copy_links":
+		args = append(args, "--copy-links")
+	}
+	if op == "sync" {
+		switch job.DeleteTiming {
+		case "during", "after", "before":
+			args = append(args, "--delete-"+job.DeleteTiming)
+		}
+	}
+	if op == "move" && job.DeleteEmptySrcDirs {
+		args = append(args, "--delete-empty-src-dirs")
+	}
+	if op == "bisync" {
+		if job.BisyncResync {
+			args = append(args, "--resync")
+		}
+		if res := strings.TrimSpace(job.BisyncConflictResolve); res != "" {
+			args = append(args, "--conflict-resolve", res)
+		}
+	}
+	if strings.TrimSpace(job.MinAge) != "" {
+		args = append(args, "--min-age", strings.TrimSpace(job.MinAge))
+	}
+	if strings.TrimSpace(job.MaxAge) != "" {
+		args = append(args, "--max-age", strings.TrimSpace(job.MaxAge))
+	}
+	if strings.TrimSpace(job.MinSize) != "" {
+		args = append(args, "--min-size", strings.TrimSpace(job.MinSize))
+	}
+	if strings.TrimSpace(job.MaxSize) != "" {
+		args = append(args, "--max-size", strings.TrimSpace(job.MaxSize))
 	}
 	if job.ServerSideAcrossConfigs {
 		args = append(args, "--server-side-across-configs")
 	}
 
 	// Incremental --backup-dir versioning
-	if job.VersioningEnabled && op != "check" {
+	if job.VersioningEnabled && op != "check" && op != "bisync" {
 		backupBase = strings.TrimSpace(job.BackupDirBase)
 		if backupBase == "" {
 			backupBase = joinRclonePath(job.Destination, "_versions")
@@ -202,7 +243,8 @@ func relativeSubpath(dest, backupBase string) (string, bool) {
 	return "", false
 }
 
-func formatCommandPreview(args []string) string {
+// FormatCommandPreview formats an rclone argument slice cleanly for UI display and run logs.
+func FormatCommandPreview(args []string) string {
 	parts := make([]string, 0, len(args))
 	for _, a := range args {
 		if strings.ContainsAny(a, " \t\n\"'") {

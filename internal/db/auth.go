@@ -229,6 +229,37 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
+// ListUserSessions returns all non-expired sessions for userID, ordered newest first.
+func (s *Store) ListUserSessions(ctx context.Context, userID string) ([]domain.Session, error) {
+	nowStr := formatSQLiteTime(time.Now().UTC())
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT token_hash, user_id, expires_at, created_at
+		 FROM sessions
+		 WHERE user_id = ? AND expires_at > ?
+		 ORDER BY created_at DESC`,
+		userID,
+		nowStr,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]domain.Session, 0)
+	for rows.Next() {
+		var sess domain.Session
+		var expiresStr, createdStr string
+		if err := rows.Scan(&sess.TokenHash, &sess.UserID, &expiresStr, &createdStr); err != nil {
+			return nil, err
+		}
+		sess.ExpiresAt, _ = parseSQLiteTime(expiresStr)
+		sess.CreatedAt, _ = parseSQLiteTime(createdStr)
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
 // DeleteUserSessionsExcept revokes all sessions belonging to userID except keepTokenHash.
 // If keepTokenHash is empty, all sessions for userID are deleted.
 func (s *Store) DeleteUserSessionsExcept(ctx context.Context, userID, keepTokenHash string) error {

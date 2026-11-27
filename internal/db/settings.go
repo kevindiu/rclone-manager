@@ -49,6 +49,12 @@ func (s *Store) SaveSettings(ctx context.Context, settings domain.GlobalSettings
 	if settings.WebhookOn == "" {
 		settings.WebhookOn = "failure"
 	}
+	settings.WebhookType = strings.ToLower(strings.TrimSpace(settings.WebhookType))
+	if settings.WebhookType == "" {
+		settings.WebhookType = "generic"
+	}
+	settings.TelegramBotToken = strings.TrimSpace(settings.TelegramBotToken)
+	settings.TelegramChatID = strings.TrimSpace(settings.TelegramChatID)
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return err
@@ -85,4 +91,10 @@ func normalizeSettings(s *domain.GlobalSettings, defaults domain.GlobalSettings)
 	if s.WebhookOn == "" {
 		s.WebhookOn = "failure"
 	}
+	s.WebhookType = strings.ToLower(strings.TrimSpace(s.WebhookType))
+	if s.WebhookType == "" {
+		s.WebhookType = "generic"
+	}
+	s.TelegramBotToken = strings.TrimSpace(s.TelegramBotToken)
+	s.TelegramChatID = strings.TrimSpace(s.TelegramChatID)
 }

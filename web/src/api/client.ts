@@ -3,6 +3,10 @@ import type {
   AuthStatus,
   AuthUser,
   BrowseEntry,
+  BulkDeleteEntry,
+  BulkDeleteResponse,
+  DailyRunStat,
+  DedupeResult,
   DirSize,
   FileVersion,
   GlobalSettings,
@@ -15,6 +19,7 @@ import type {
   RemoteInfo,
   RemoteTestResult,
   RestoreConflictMode,
+  SessionInfo,
   SystemInfo,
 } from '../types/api';
 
@@ -75,6 +80,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ current_password, new_password }),
     }),
+  authSessions: () => request<SessionInfo[]>('/api/auth/sessions'),
+  authRevokeOtherSessions: () =>
+    request<{ status: string }>('/api/auth/sessions/revoke-others', {
+      method: 'POST',
+    }),
 
   // System
   getSystemInfo: () => request<SystemInfo>('/api/system/info'),
@@ -86,10 +96,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
-  testWebhook: (webhook_url: string) =>
+  testWebhook: (opts: {
+    webhook_url?: string;
+    webhook_type?: string;
+    telegram_bot_token?: string;
+    telegram_chat_id?: string;
+  }) =>
     request<{ status: string }>('/api/settings/test-webhook', {
       method: 'POST',
-      body: JSON.stringify({ webhook_url }),
+      body: JSON.stringify(opts),
     }),
   importConfig: (content: string, mode: 'merge' | 'replace', contentType = 'application/json') =>
     request<{ status: string; mode: string; jobs_imported: number }>(
@@ -133,6 +148,11 @@ export const api = {
     request<{ name: string; status: string }>(`/api/remotes/${encodeURIComponent(name)}/cleanup`, {
       method: 'POST',
     }),
+  dedupeRemote: (name: string, opts: { path?: string; mode?: string; dry_run?: boolean } = {}) =>
+    request<DedupeResult>(`/api/remotes/${encodeURIComponent(name)}/dedupe`, {
+      method: 'POST',
+      body: JSON.stringify(opts),
+    }),
 
   // Jobs
   listJobs: () => request<JobWithStatus[]>('/api/jobs'),
@@ -146,6 +166,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(job),
     }),
+  previewJobCommand: (job: Partial<Job>, dry_run = false, resync = false) =>
+    request<{ command: string }>('/api/jobs/preview-command', {
+      method: 'POST',
+      body: JSON.stringify({ job, dry_run, resync }),
+    }),
   deleteJob: (id: string) =>
     request<{ status: string }>(`/api/jobs/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -158,10 +183,10 @@ export const api = {
     request<Job>(`/api/jobs/${encodeURIComponent(id)}/toggle`, {
       method: 'POST',
     }),
-  runJob: (id: string, dryRun = false) =>
+  runJob: (id: string, dryRun = false, resync = false) =>
     request<JobRun>(`/api/jobs/${encodeURIComponent(id)}/run`, {
       method: 'POST',
-      body: JSON.stringify({ dry_run: dryRun }),
+      body: JSON.stringify({ dry_run: dryRun, resync }),
     }),
   stopJob: (id: string) =>
     request<{ status: string }>(`/api/jobs/${encodeURIComponent(id)}/stop`, {
@@ -204,6 +229,17 @@ export const api = {
     request<{ status: string }>(`/api/runs/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
+  getRunStats: (days = 14) => request<DailyRunStat[]>(`/api/runs/stats?days=${days}`),
+  clearRuns: (params: { job_id?: string; status?: string; trigger?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.job_id) q.set('job_id', params.job_id);
+    if (params.status) q.set('status', params.status);
+    if (params.trigger) q.set('trigger', params.trigger);
+    const qs = q.toString();
+    return request<{ deleted: number }>(`/api/runs${qs ? `?${qs}` : ''}`, {
+      method: 'DELETE',
+    });
+  },
 
   // Browse & Restore
   browse: (remote: string, path = '') =>
@@ -244,8 +280,15 @@ export const api = {
       `/api/browse/entry?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}&is_dir=${is_dir ? '1' : '0'}`,
       { method: 'DELETE' }
     ),
+  browseBulkDelete: (remote: string, entries: BulkDeleteEntry[]) =>
+    request<BulkDeleteResponse>('/api/browse/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ remote, entries }),
+    }),
   downloadUrl: (remote: string, path: string) =>
     `/api/browse/download?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`,
+  previewUrl: (remote: string, path: string) =>
+    `/api/browse/download?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}&inline=1`,
   listVersions: (remote: string, path: string) =>
     request<{ remote: string; path: string; versions: FileVersion[] }>(
       `/api/browse/versions?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`

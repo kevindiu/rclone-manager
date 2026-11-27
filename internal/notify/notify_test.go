@@ -119,3 +119,79 @@ func TestBuildRunPayloadAndSend(t *testing.T) {
 		t.Fatalf("expected HTTP 502 error, got %v", err)
 	}
 }
+
+func TestNotifyProvidersAndOverrides(t *testing.T) {
+	if got := EffectiveWebhookOn("failure", ""); got != "failure" {
+		t.Fatalf("expected global fallback 'failure', got %q", got)
+	}
+	if got := EffectiveWebhookOn("failure", "always"); got != "always" {
+		t.Fatalf("expected override 'always', got %q", got)
+	}
+	if got := EffectiveWebhookOn("always", "off"); got != "off" {
+		t.Fatalf("expected override 'off', got %q", got)
+	}
+
+	n := NewNotifier(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var gotURL, gotCT, gotTitle, gotPriority, gotTags, gotBody string
+	n.client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			gotURL = req.URL.String()
+			gotCT = req.Header.Get("Content-Type")
+			gotTitle = req.Header.Get("Title")
+			gotPriority = req.Header.Get("Priority")
+			gotTags = req.Header.Get("Tags")
+			raw, _ := io.ReadAll(req.Body)
+			gotBody = string(raw)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	// Ntfy failed run uses high priority + rotating_light tag + plain text.
+	n.NotifyRun(context.Background(), domain.GlobalSettings{
+		WebhookURL:  "https://ntfy.sh/my-topic",
+		WebhookOn:   "failure",
+		WebhookType: "ntfy",
+	}, domain.JobRun{ID: "r1", JobName: "Photos", Status: "failed", Trigger: "schedule"})
+	if !strings.HasPrefix(gotCT, "text/plain") || gotPriority != "high" || gotTags != "rotating_light" || gotTitle == "" {
+		t.Fatalf("unexpected ntfy headers: ct=%q title=%q prio=%q tags=%q", gotCT, gotTitle, gotPriority, gotTags)
+	}
+
+	// Telegram posts {"chat_id","text"} and validates chat ID & bot token.
+	if HasDeliveryTarget(domain.GlobalSettings{WebhookType: "telegram", TelegramBotToken: "123:ABC"}) {
+		t.Fatal("expected HasDeliveryTarget=false when telegram_chat_id is missing")
+	}
+	if !HasDeliveryTarget(domain.GlobalSettings{WebhookType: "telegram", TelegramBotToken: "123:ABC", TelegramChatID: "-100123456"}) {
+		t.Fatal("expected HasDeliveryTarget=true with bot token and chat ID")
+	}
+	if err := n.SendTestSettings(context.Background(), domain.GlobalSettings{
+		WebhookURL:  "https://api.telegram.org/botTOKEN/sendMessage",
+		WebhookType: "telegram",
+	}); err == nil {
+		t.Fatal("expected error when telegram_chat_id is empty")
+	}
+	if err := n.SendTestSettings(context.Background(), domain.GlobalSettings{
+		WebhookType:      "telegram",
+		TelegramBotToken: "123:bad token/slash",
+		TelegramChatID:   "-100123456",
+	}); err == nil {
+		t.Fatal("expected error for malformed telegram bot token")
+	}
+	if err := n.SendTestSettings(context.Background(), domain.GlobalSettings{
+		WebhookType:      "telegram",
+		TelegramBotToken: "123456:ABC-DEF",
+		TelegramChatID:   "-100123456",
+	}); err != nil {
+		t.Fatalf("telegram SendTestSettings failed: %v", err)
+	}
+	if gotURL != "https://api.telegram.org/bot123456:ABC-DEF/sendMessage" {
+		t.Fatalf("unexpected resolved telegram URL: %q", gotURL)
+	}
+	var tg map[string]string
+	if err := json.Unmarshal([]byte(gotBody), &tg); err != nil || tg["chat_id"] != "-100123456" || tg["text"] == "" {
+		t.Fatalf("unexpected telegram payload: %q err=%v", gotBody, err)
+	}
+}

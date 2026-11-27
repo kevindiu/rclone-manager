@@ -428,10 +428,84 @@ func TestUsersAndSessionsLifecycle(t *testing.T) {
 		t.Fatalf("expected tok-active-1 preserved, got %v", err)
 	}
 
+	// List active user sessions excludes expired (tok-active-1 + tok-list-1 remain).
+	_ = store.CreateSession(ctx, domain.Session{
+		TokenHash: "tok-list-1",
+		UserID:    user.ID,
+		ExpiresAt: now.Add(time.Hour),
+		CreatedAt: now,
+	})
+	_ = store.CreateSession(ctx, domain.Session{
+		TokenHash: "tok-list-expired",
+		UserID:    user.ID,
+		ExpiresAt: now.Add(-time.Minute),
+		CreatedAt: now.Add(-2 * time.Hour),
+	})
+	activeSessions, err := store.ListUserSessions(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("ListUserSessions: %v", err)
+	}
+	if len(activeSessions) != 2 {
+		t.Fatalf("expected 2 active sessions (excluding expired), got %d: %+v", len(activeSessions), activeSessions)
+	}
+	for _, s := range activeSessions {
+		if s.TokenHash == "tok-list-expired" {
+			t.Fatalf("expected expired session excluded, got %+v", activeSessions)
+		}
+	}
+
 	if err := store.DeleteSession(ctx, "tok-active-1"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 	if _, _, err := store.GetSessionWithUser(ctx, "tok-active-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after DeleteSession, got %v", err)
+	}
+}
+
+func TestDailyRunStatsAndDeleteFinishedRuns(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	tmpDir := t.TempDir()
+
+	doneLog := filepath.Join(tmpDir, "done.log")
+	if err := os.WriteFile(doneLog, []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, r := range []domain.JobRun{
+		{ID: "s1", JobID: "j1", JobName: "J1", Trigger: "manual", Status: "success", StartedAt: now, BytesTransferred: 1000, LogFile: doneLog},
+		{ID: "f1", JobID: "j1", JobName: "J1", Trigger: "schedule", Status: "failed", StartedAt: now, BytesTransferred: 500},
+		{ID: "a1", JobID: "j1", JobName: "J1", Trigger: "manual", Status: "running", StartedAt: now, BytesTransferred: 9999},
+	} {
+		if err := store.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun %s: %v", r.ID, err)
+		}
+	}
+
+	stats, err := store.GetDailyRunStats(ctx, 14)
+	if err != nil {
+		t.Fatalf("GetDailyRunStats: %v", err)
+	}
+	if len(stats) != 14 {
+		t.Fatalf("expected 14 dense stat rows, got %d", len(stats))
+	}
+	today := stats[len(stats)-1]
+	if today.SuccessCount != 1 || today.FailedCount != 1 || today.BytesTransferred != 1500 {
+		t.Fatalf("unexpected today stats (should exclude running): %+v", today)
+	}
+
+	deleted, err := store.DeleteFinishedRuns(ctx, "j1", "success", "")
+	if err != nil {
+		t.Fatalf("DeleteFinishedRuns: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected 1 deleted run, got %d", deleted)
+	}
+	if _, err := os.Stat(doneLog); !os.IsNotExist(err) {
+		t.Fatalf("expected done log file removed, stat err=%v", err)
+	}
+	// Running run must still exist.
+	if _, err := store.GetRun(ctx, "a1"); err != nil {
+		t.Fatalf("expected running run preserved, got %v", err)
 	}
 }

@@ -32,6 +32,36 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleRunStats(w http.ResponseWriter, r *http.Request) {
+	days := 14
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			days = parsed
+		}
+	}
+	if days < 1 {
+		days = 1
+	} else if days > 90 {
+		days = 90
+	}
+	stats, err := s.svc.GetDailyRunStats(r.Context(), days)
+	if err != nil {
+		s.writeInternalError(w, r, "get daily run stats failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleClearRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	deleted, err := s.svc.ClearFinishedRuns(r.Context(), q.Get("job_id"), q.Get("status"), q.Get("trigger"))
+	if err != nil {
+		s.writeInternalError(w, r, "clear finished runs failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
+}
+
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	run, err := s.svc.GetRun(r.Context(), id)

@@ -82,12 +82,14 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) registerRoutes() {
-	// Authentication (public status/setup/login/logout + protected password change)
+	// Authentication (public status/setup/login/logout + protected password & session management)
 	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("POST /api/auth/change-password", s.handleAuthChangePassword)
+	s.mux.HandleFunc("GET /api/auth/sessions", s.handleAuthSessions)
+	s.mux.HandleFunc("POST /api/auth/sessions/revoke-others", s.handleAuthRevokeOtherSessions)
 
 	// System
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
@@ -110,10 +112,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/remotes/{name}/test", s.handleTestRemote)
 	s.mux.HandleFunc("GET /api/remotes/{name}/about", s.handleAboutRemote)
 	s.mux.HandleFunc("POST /api/remotes/{name}/cleanup", s.handleCleanupRemote)
+	s.mux.HandleFunc("POST /api/remotes/{name}/dedupe", s.handleDedupeRemote)
 
 	// Jobs & Cron
 	s.mux.HandleFunc("GET /api/jobs", s.handleListJobs)
 	s.mux.HandleFunc("POST /api/jobs", s.handleCreateJob)
+	s.mux.HandleFunc("POST /api/jobs/preview-command", s.handlePreviewJobCommand)
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.handleGetJob)
 	s.mux.HandleFunc("PUT /api/jobs/{id}", s.handleUpdateJob)
 	s.mux.HandleFunc("DELETE /api/jobs/{id}", s.handleDeleteJob)
@@ -125,6 +129,8 @@ func (s *Server) registerRoutes() {
 
 	// Runs & Logs
 	s.mux.HandleFunc("GET /api/runs", s.handleListRuns)
+	s.mux.HandleFunc("GET /api/runs/stats", s.handleRunStats)
+	s.mux.HandleFunc("DELETE /api/runs", s.handleClearRuns)
 	s.mux.HandleFunc("GET /api/runs/{id}", s.handleGetRun)
 	s.mux.HandleFunc("GET /api/runs/{id}/logs", s.handleGetRunLogs)
 	s.mux.HandleFunc("DELETE /api/runs/{id}", s.handleDeleteRun)
@@ -137,6 +143,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/browse/upload", s.handleBrowseUpload)
 	s.mux.HandleFunc("POST /api/browse/rename", s.handleBrowseRename)
 	s.mux.HandleFunc("DELETE /api/browse/entry", s.handleBrowseDelete)
+	s.mux.HandleFunc("POST /api/browse/bulk-delete", s.handleBrowseBulkDelete)
 	s.mux.HandleFunc("GET /api/browse/download", s.handleBrowseDownload)
 	s.mux.HandleFunc("GET /api/browse/versions", s.handleBrowseVersions)
 	s.mux.HandleFunc("POST /api/browse/restore", s.handleBrowseRestore)

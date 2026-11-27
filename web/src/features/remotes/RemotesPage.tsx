@@ -5,7 +5,9 @@ import {
   Eraser,
   FolderOpen,
   HardDrive,
+  Layers,
   Loader2,
+  Lock,
   Plus,
   Trash2,
   Upload,
@@ -16,6 +18,8 @@ import { api } from '../../api/client';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import type { ProviderInfo, RemoteAbout, RemoteInfo, RemoteTestResult } from '../../types/api';
 import { formatBytes } from '../../utils/format';
+import { CryptWizardModal } from './CryptWizardModal';
+import { DedupeModal } from './DedupeModal';
 import { ImportConfModal } from './ImportConfModal';
 import { RemoteModal } from './RemoteModal';
 
@@ -42,6 +46,8 @@ export function RemotesPage({
   const [deleting, setDeleting] = useState(false);
   const [confirmCleanupRemote, setConfirmCleanupRemote] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
+  const [showCryptWizard, setShowCryptWizard] = useState(false);
+  const [dedupeRemote, setDedupeRemote] = useState<string | null>(null);
 
   const runTest = async (name: string) => {
     setTesting((p) => ({ ...p, [name]: true }));
@@ -116,6 +122,14 @@ export function RemotesPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCryptWizard(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
+          >
+            <Lock className="w-4 h-4" />
+            Encrypted Remote
+          </button>
           <button
             type="button"
             onClick={() => setShowImport(true)}
@@ -301,6 +315,15 @@ export function RemotesPage({
                     <Eraser className="w-3.5 h-3.5 text-amber-400" />
                     Empty Trash
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setDedupeRemote(rem.name)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
+                    title="Find and resolve duplicate filenames via rclone dedupe"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-violet-400" />
+                    Dedupe
+                  </button>
                 </div>
               </div>
             );
@@ -311,6 +334,7 @@ export function RemotesPage({
       {modalRemote !== undefined && (
         <RemoteModal
           providers={providers}
+          remotes={remotes}
           existing={modalRemote}
           onSaved={() => {
             onToast(modalRemote ? 'Remote updated' : 'Remote created');
@@ -349,6 +373,21 @@ export function RemotesPage({
           onCancel={() => setConfirmCleanupRemote(null)}
           onConfirm={() => void handleCleanup(confirmCleanupRemote)}
         />
+      )}
+
+      {showCryptWizard && (
+        <CryptWizardModal
+          remotes={remotes}
+          onCreated={(createdName) => {
+            onToast(`Created encrypted remote "${createdName}"`);
+            onReload();
+          }}
+          onClose={() => setShowCryptWizard(false)}
+        />
+      )}
+
+      {dedupeRemote && (
+        <DedupeModal remoteName={dedupeRemote} onClose={() => setDedupeRemote(null)} />
       )}
     </div>
   );

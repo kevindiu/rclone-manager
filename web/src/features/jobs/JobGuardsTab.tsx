@@ -11,6 +11,14 @@ export function JobGuardsTab({
   setMaxTransfer,
   cutoffMode,
   setCutoffMode,
+  minAge,
+  setMinAge,
+  maxAge,
+  setMaxAge,
+  minSize,
+  setMinSize,
+  maxSize,
+  setMaxSize,
   excludesText,
   setExcludesText,
   includesText,
@@ -28,6 +36,14 @@ export function JobGuardsTab({
   setMaxTransfer: (v: string) => void;
   cutoffMode: 'soft' | 'hard' | 'cautious' | '';
   setCutoffMode: (v: 'soft' | 'hard' | 'cautious') => void;
+  minAge: string;
+  setMinAge: (v: string) => void;
+  maxAge: string;
+  setMaxAge: (v: string) => void;
+  minSize: string;
+  setMinSize: (v: string) => void;
+  maxSize: string;
+  setMaxSize: (v: string) => void;
   excludesText: string;
   setExcludesText: (v: string) => void;
   includesText: string;
@@ -108,6 +124,58 @@ export function JobGuardsTab({
             <option value="hard">hard (stop immediately)</option>
             <option value="cautious">cautious (check before starting file)</option>
           </select>
+        </div>
+      </div>
+
+      <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+        <div className="text-xs font-semibold uppercase tracking-wider text-sky-400">
+          Age &amp; Size Filters
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Min Age (<code>--min-age</code>)
+            </label>
+            <input
+              value={minAge}
+              onChange={(e) => setMinAge(e.target.value)}
+              placeholder="e.g. 24h"
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Max Age (<code>--max-age</code>)
+            </label>
+            <input
+              value={maxAge}
+              onChange={(e) => setMaxAge(e.target.value)}
+              placeholder="e.g. 30d"
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Min Size (<code>--min-size</code>)
+            </label>
+            <input
+              value={minSize}
+              onChange={(e) => setMinSize(e.target.value)}
+              placeholder="e.g. 10M"
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Max Size (<code>--max-size</code>)
+            </label>
+            <input
+              value={maxSize}
+              onChange={(e) => setMaxSize(e.target.value)}
+              placeholder="e.g. 2G"
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+            />
+          </div>
         </div>
       </div>
 

@@ -33,6 +33,8 @@ type Store interface {
 	GetRun(ctx context.Context, id string) (*domain.JobRun, error)
 	GetLastRunsByJobIDs(ctx context.Context) (map[string]domain.JobRun, error)
 	DeleteRun(ctx context.Context, id string) error
+	DeleteFinishedRuns(ctx context.Context, jobID, status, trigger string) (int64, error)
+	GetDailyRunStats(ctx context.Context, days int) ([]domain.DailyRunStat, error)
 }
 
 // JobRunner defines execution controls needed by AppService.
@@ -89,14 +91,14 @@ type JobWithStatus struct {
 
 // AppService orchestrates settings, jobs, runs, scheduling, remotes, and event broadcasting.
 type AppService struct {
-	store             Store
-	runner            JobRunner
-	scheduler         ScheduleReloader
-	hub               Broadcaster
-	browser           RcloneBrowser
-	logger            *slog.Logger
-	defaults          domain.GlobalSettings
-	webhookTestSender func(ctx context.Context, webhookURL string) error
+	store                 Store
+	runner                JobRunner
+	scheduler             ScheduleReloader
+	hub                   Broadcaster
+	browser               RcloneBrowser
+	logger                *slog.Logger
+	defaults              domain.GlobalSettings
+	webhookSettingsTester func(ctx context.Context, settings domain.GlobalSettings) error
 }
 
 // New creates a new AppService.
@@ -113,14 +115,14 @@ func New(
 		logger = slog.Default()
 	}
 	return &AppService{
-		store:             store,
-		runner:            runner,
-		scheduler:         sched,
-		hub:               hub,
-		browser:           browser,
-		logger:            logger,
-		defaults:          defaults,
-		webhookTestSender: notify.NewNotifier(logger).SendTest,
+		store:                 store,
+		runner:                runner,
+		scheduler:             sched,
+		hub:                   hub,
+		browser:               browser,
+		logger:                logger,
+		defaults:              defaults,
+		webhookSettingsTester: notify.NewNotifier(logger).SendTestSettings,
 	}
 }
 
@@ -150,11 +152,31 @@ func validateSettingsFields(settings *domain.GlobalSettings) error {
 		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	settings.WebhookOn = normalizedOn
+	normalizedType, err := notify.NormalizeWebhookType(settings.WebhookType)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	settings.WebhookType = normalizedType
+	settings.TelegramBotToken = strings.TrimSpace(settings.TelegramBotToken)
+	if settings.TelegramBotToken != "" && strings.ContainsAny(settings.TelegramBotToken, " \t\r\n/?#") {
+		return fmt.Errorf("%w: telegram_bot_token contains invalid characters", ErrValidation)
+	}
+	settings.TelegramChatID = strings.TrimSpace(settings.TelegramChatID)
+	if settings.WebhookType == "telegram" && (settings.TelegramBotToken != "" || settings.WebhookURL != "") && settings.TelegramChatID == "" {
+		return fmt.Errorf("%w: telegram_chat_id is required when webhook_type is telegram", ErrValidation)
+	}
 	return nil
 }
 
 // UpdateSettings validates, saves, and applies global settings.
 func (s *AppService) UpdateSettings(ctx context.Context, incoming domain.GlobalSettings) (domain.GlobalSettings, error) {
+	if strings.TrimSpace(incoming.TelegramBotToken) == rclone.MaskedSecret {
+		if existing, err := s.store.GetSettings(ctx, s.defaults); err == nil {
+			incoming.TelegramBotToken = existing.TelegramBotToken
+		} else {
+			incoming.TelegramBotToken = ""
+		}
+	}
 	if err := validateSettingsFields(&incoming); err != nil {
 		return domain.GlobalSettings{}, err
 	}
@@ -175,24 +197,73 @@ func (s *AppService) UpdateSettings(ctx context.Context, incoming domain.GlobalS
 	return updated, nil
 }
 
-// TestWebhook delivers a verification webhook notification using the supplied URL
-// or, when omitted, the currently saved webhook URL.
+// TestWebhook delivers a verification notification to webhookURL using generic JSON format.
 func (s *AppService) TestWebhook(ctx context.Context, webhookURL string) error {
-	target := strings.TrimSpace(webhookURL)
-	if target == "" {
-		settings, err := s.store.GetSettings(ctx, s.defaults)
-		if err != nil {
-			return err
-		}
-		target = strings.TrimSpace(settings.WebhookURL)
+	return s.TestWebhookSettings(ctx, webhookURL, "", "", "")
+}
+
+// TestWebhookSettings delivers a verification notification using the supplied target and provider type,
+// falling back to saved global settings for omitted fields.
+func (s *AppService) TestWebhookSettings(ctx context.Context, webhookURL, webhookType, telegramBotToken, telegramChatID string) error {
+	saved, err := s.store.GetSettings(ctx, s.defaults)
+	if err != nil {
+		saved = s.defaults
 	}
-	if target == "" {
-		return fmt.Errorf("%w: webhook URL is required", ErrValidation)
+
+	wTypeRaw := strings.TrimSpace(webhookType)
+	if wTypeRaw == "" {
+		wTypeRaw = saved.WebhookType
 	}
-	if err := notify.ValidateWebhookURL(target); err != nil {
+	wType, err := notify.NormalizeWebhookType(wTypeRaw)
+	if err != nil {
 		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
-	return s.webhookTestSender(ctx, target)
+
+	target := strings.TrimSpace(webhookURL)
+	if target == "" {
+		target = strings.TrimSpace(saved.WebhookURL)
+	}
+
+	botToken := strings.TrimSpace(telegramBotToken)
+	if botToken == "" || botToken == rclone.MaskedSecret {
+		botToken = strings.TrimSpace(saved.TelegramBotToken)
+	}
+
+	chatID := strings.TrimSpace(telegramChatID)
+	if chatID == "" {
+		chatID = strings.TrimSpace(saved.TelegramChatID)
+	}
+
+	if wType == "telegram" {
+		if botToken == "" && target == "" {
+			return fmt.Errorf("%w: telegram_bot_token is required for Telegram notifications", ErrValidation)
+		}
+		if botToken != "" && strings.ContainsAny(botToken, " \t\r\n/?#") {
+			return fmt.Errorf("%w: telegram_bot_token contains invalid characters", ErrValidation)
+		}
+		if botToken == "" && target != "" {
+			if err := notify.ValidateWebhookURL(target); err != nil {
+				return fmt.Errorf("%w: %v", ErrValidation, err)
+			}
+		}
+		if chatID == "" {
+			return fmt.Errorf("%w: telegram_chat_id is required for Telegram notifications", ErrValidation)
+		}
+	} else {
+		if target == "" {
+			return fmt.Errorf("%w: webhook URL is required", ErrValidation)
+		}
+		if err := notify.ValidateWebhookURL(target); err != nil {
+			return fmt.Errorf("%w: %v", ErrValidation, err)
+		}
+	}
+
+	return s.webhookSettingsTester(ctx, domain.GlobalSettings{
+		WebhookURL:       target,
+		WebhookType:      wType,
+		TelegramBotToken: botToken,
+		TelegramChatID:   chatID,
+	})
 }
 
 // ExportBundle exports settings and all jobs into a portable bundle.

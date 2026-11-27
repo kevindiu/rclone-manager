@@ -1,7 +1,8 @@
 import { Sparkles } from 'lucide-react';
-import type { GlobalSettings } from '../../types/api';
+import type { GlobalSettings, Job } from '../../types/api';
 
 export function JobOverridesTab({
+  operation,
   settings,
   transfers,
   setTransfers,
@@ -27,7 +28,20 @@ export function JobOverridesTab({
   setUpdateOnly,
   serverSideAcrossConfigs,
   setServerSideAcrossConfigs,
+  deleteTiming,
+  setDeleteTiming,
+  deleteEmptySrcDirs,
+  setDeleteEmptySrcDirs,
+  symlinkMode,
+  setSymlinkMode,
+  sizeOnly,
+  setSizeOnly,
+  ignoreExisting,
+  setIgnoreExisting,
+  notifyOverride,
+  setNotifyOverride,
 }: {
+  operation: Job['operation'];
   settings: GlobalSettings;
   transfers: string;
   setTransfers: (v: string) => void;
@@ -53,6 +67,18 @@ export function JobOverridesTab({
   setUpdateOnly: (v: boolean) => void;
   serverSideAcrossConfigs: boolean;
   setServerSideAcrossConfigs: (v: boolean) => void;
+  deleteTiming: NonNullable<Job['delete_timing']>;
+  setDeleteTiming: (v: NonNullable<Job['delete_timing']>) => void;
+  deleteEmptySrcDirs: boolean;
+  setDeleteEmptySrcDirs: (v: boolean) => void;
+  symlinkMode: NonNullable<Job['symlink_mode']>;
+  setSymlinkMode: (v: NonNullable<Job['symlink_mode']>) => void;
+  sizeOnly: boolean;
+  setSizeOnly: (v: boolean) => void;
+  ignoreExisting: boolean;
+  setIgnoreExisting: (v: boolean) => void;
+  notifyOverride: NonNullable<Job['notify_override']>;
+  setNotifyOverride: (v: NonNullable<Job['notify_override']>) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -127,6 +153,114 @@ export function JobOverridesTab({
               </p>
             </div>
           </label>
+
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sizeOnly}
+              onChange={(e) => setSizeOnly(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-sky-500"
+            />
+            <div>
+              <div className="text-xs font-mono font-medium text-slate-100">--size-only</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Skip files matched by size alone, ignoring modification timestamps.
+              </p>
+            </div>
+          </label>
+
+          {operation !== 'check' && operation !== 'bisync' && (
+            <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ignoreExisting}
+                onChange={(e) => setIgnoreExisting(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded accent-sky-500"
+              />
+              <div>
+                <div className="text-xs font-mono font-medium text-slate-100">
+                  --ignore-existing
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Skip all files that already exist on Destination.
+                </p>
+              </div>
+            </label>
+          )}
+
+          {operation === 'move' && (
+            <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={deleteEmptySrcDirs}
+                onChange={(e) => setDeleteEmptySrcDirs(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded accent-rose-500"
+              />
+              <div>
+                <div className="text-xs font-mono font-medium text-slate-100">
+                  --delete-empty-src-dirs
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Remove empty directories left behind on Source after moving files.
+                </p>
+              </div>
+            </label>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+          {operation === 'sync' && (
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                Sync Delete Timing
+              </label>
+              <select
+                value={deleteTiming}
+                onChange={(e) =>
+                  setDeleteTiming(e.target.value as NonNullable<Job['delete_timing']>)
+                }
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
+              >
+                <option value="">Default (during)</option>
+                <option value="during">--delete-during (while copying)</option>
+                <option value="after">--delete-after (safest on flaky net)</option>
+                <option value="before">--delete-before (free dest space first)</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Symlink Handling
+            </label>
+            <select
+              value={symlinkMode}
+              onChange={(e) => setSymlinkMode(e.target.value as NonNullable<Job['symlink_mode']>)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
+            >
+              <option value="">Default (skip symlinks)</option>
+              <option value="links">Preserve as .rclonelink (--links)</option>
+              <option value="copy_links">Follow &amp; copy targets (--copy-links)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Notification Override
+            </label>
+            <select
+              value={notifyOverride}
+              onChange={(e) =>
+                setNotifyOverride(e.target.value as NonNullable<Job['notify_override']>)
+              }
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
+            >
+              <option value="">Use global setting ({settings.webhook_on || 'failure'})</option>
+              <option value="always">Always notify</option>
+              <option value="failure">On failure only</option>
+              <option value="off">Never notify (muted)</option>
+            </select>
+          </div>
         </div>
       </div>
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/kevindiu/rclone-manager/internal/rclone"
@@ -146,4 +147,27 @@ func (s *Server) handleCleanupRemote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "status": "cleaned"})
+}
+
+func (s *Server) handleDedupeRemote(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		Path   string `json:"path"`
+		Mode   string `json:"mode"`
+		DryRun bool   `json:"dry_run"`
+	}
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
+	}
+	res, err := s.client.DedupeRemote(r.Context(), name, req.Path, req.Mode, req.DryRun)
+	if err != nil {
+		if errors.Is(err, rclone.ErrRemoteNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

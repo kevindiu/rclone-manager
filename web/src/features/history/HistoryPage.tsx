@@ -26,6 +26,8 @@ export function HistoryPage({
   const [loading, setLoading] = useState(false);
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<JobRun | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const limit = 25;
 
   const loadRuns = useCallback(async () => {
@@ -63,6 +65,25 @@ export function HistoryPage({
       onToast(err instanceof Error ? err.message : 'Delete failed', true);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleClearFiltered = async () => {
+    setClearing(true);
+    try {
+      const res = await api.clearRuns({
+        job_id: jobFilter || undefined,
+        status: statusFilter || undefined,
+        trigger: triggerFilter || undefined,
+      });
+      onToast(`Cleared ${res.deleted} finished run record(s)`);
+      setConfirmClear(false);
+      setOffset(0);
+      void loadRuns();
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Clear failed', true);
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -119,14 +140,26 @@ export function HistoryPage({
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void loadRuns()}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={total === 0}
+            onClick={() => setConfirmClear(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 disabled:opacity-40"
+            title="Delete finished runs matching the current filters"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Clear Filtered
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadRuns()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="rounded-2xl bg-slate-900/90 border border-slate-800 divide-y divide-slate-800/70 overflow-hidden">
@@ -221,6 +254,17 @@ export function HistoryPage({
           busy={deleting}
           onCancel={() => setConfirmDeleteRun(null)}
           onConfirm={() => void handleDelete(confirmDeleteRun)}
+        />
+      )}
+
+      {confirmClear && (
+        <ConfirmModal
+          title="Clear Filtered History"
+          message="Permanently delete all completed runs and log files matching the current filters? Active or queued runs will be preserved."
+          confirmLabel="Clear History"
+          busy={clearing}
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => void handleClearFiltered()}
         />
       )}
     </div>

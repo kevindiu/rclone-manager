@@ -6,6 +6,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { Tab } from '../../hooks/useRoute';
 import type {
   ActiveRunSnapshot,
+  DailyRunStat,
   JobRun,
   JobWithStatus,
   RemoteAbout,
@@ -13,6 +14,7 @@ import type {
   SystemInfo,
 } from '../../types/api';
 import { formatBytes, formatDateTime, formatDurationMs, formatRelative } from '../../utils/format';
+import { StatsChart } from './StatsChart';
 
 export function DashboardPage({
   activeRuns,
@@ -39,6 +41,8 @@ export function DashboardPage({
 }) {
   const [aboutMap, setAboutMap] = useState<Record<string, RemoteAbout>>({});
   const [loadingAbout, setLoadingAbout] = useState<Record<string, boolean>>({});
+  const [runStats, setRunStats] = useState<DailyRunStat[]>([]);
+  const [loadingStats, setLoadingStats] = useState(true);
   const fetchedRef = useRef<Set<string>>(new Set());
 
   const handleStop = async (jobId: string) => {
@@ -93,6 +97,23 @@ export function DashboardPage({
       cancelled = true;
     };
   }, [remotes, fetchAbout]);
+
+  useEffect(() => {
+    void recentRuns;
+    let cancelled = false;
+    api
+      .getRunStats(14)
+      .then((res) => {
+        if (!cancelled) setRunStats(res ?? []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingStats(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [recentRuns]);
 
   const enabledScheduled = jobs
     .filter((j) => j.enabled && j.next_run)
@@ -304,6 +325,8 @@ export function DashboardPage({
       )}
 
       {/* Upcoming Schedule & Recent Runs */}
+      <StatsChart stats={runStats} loading={loadingStats} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <section className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between">

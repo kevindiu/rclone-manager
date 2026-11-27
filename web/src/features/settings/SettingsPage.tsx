@@ -5,15 +5,18 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  LogOut,
+  Monitor,
   Save,
   Send,
   Server,
   Upload,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client';
-import type { AuthUser, GlobalSettings, SystemInfo } from '../../types/api';
-import { COMMON_TIMEZONES } from '../../utils/format';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import type { AuthUser, GlobalSettings, SessionInfo, SystemInfo } from '../../types/api';
+import { COMMON_TIMEZONES, formatDateTime } from '../../utils/format';
 
 export function SettingsPage({
   settings,
@@ -38,7 +41,13 @@ export function SettingsPage({
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
+  const [showTelegramToken, setShowTelegramToken] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [confirmRevokeOthers, setConfirmRevokeOthers] = useState(false);
+  const [revokingOthers, setRevokingOthers] = useState(false);
 
   const hasUnsavedChanges =
     form.transfers !== settings.transfers ||
@@ -52,11 +61,30 @@ export function SettingsPage({
     form.timezone !== settings.timezone ||
     form.max_concurrent_jobs !== settings.max_concurrent_jobs ||
     (form.webhook_url ?? '') !== (settings.webhook_url ?? '') ||
-    (form.webhook_on || 'failure') !== (settings.webhook_on || 'failure');
+    (form.webhook_on || 'failure') !== (settings.webhook_on || 'failure') ||
+    (form.webhook_type || 'generic') !== (settings.webhook_type || 'generic') ||
+    (form.telegram_bot_token ?? '') !== (settings.telegram_bot_token ?? '') ||
+    (form.telegram_chat_id ?? '') !== (settings.telegram_chat_id ?? '');
 
   useEffect(() => {
     setForm(settings);
   }, [settings]);
+
+  const loadSessions = useCallback(async () => {
+    setLoadingSessions(true);
+    try {
+      const list = await api.authSessions();
+      setSessions(list ?? []);
+    } catch {
+      // ignore session load errors
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,10 +103,15 @@ export function SettingsPage({
   const handleTestWebhook = async () => {
     setTestingWebhook(true);
     try {
-      await api.testWebhook(form.webhook_url ?? '');
-      onToast('Test webhook notification sent');
+      await api.testWebhook({
+        webhook_url: form.webhook_url ?? '',
+        webhook_type: form.webhook_type || 'generic',
+        telegram_bot_token: form.telegram_bot_token ?? '',
+        telegram_chat_id: form.telegram_chat_id ?? '',
+      });
+      onToast('Test notification sent');
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Webhook test failed', true);
+      onToast(err instanceof Error ? err.message : 'Notification test failed', true);
     } finally {
       setTestingWebhook(false);
     }
@@ -126,11 +159,26 @@ export function SettingsPage({
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
+      void loadSessions();
       onToast('Password updated. Other active sessions were signed out.');
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Failed to update password', true);
     } finally {
       setChangingPassword(false);
+    }
+  };
+
+  const handleRevokeOtherSessions = async () => {
+    setRevokingOthers(true);
+    try {
+      await api.authRevokeOtherSessions();
+      setConfirmRevokeOthers(false);
+      await loadSessions();
+      onToast('Signed out all other devices');
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to revoke other sessions', true);
+    } finally {
+      setRevokingOthers(false);
     }
   };
 
@@ -284,57 +332,189 @@ export function SettingsPage({
           <div>
             <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
               <Bell className="w-4 h-4 text-sky-400" />
-              Notifications (Webhook)
+              Notifications
             </h3>
             <p className="text-xs text-slate-400">
-              Send JSON alerts to Discord, Slack, Ntfy, or any generic HTTP webhook endpoint.
+              Choose a notification provider: Webhook (Discord / Slack / Generic), Telegram Bot, or
+              Ntfy.
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-            <div className="sm:col-span-2">
-              <label
-                htmlFor="settings-webhook-url"
-                className="block text-xs font-medium text-slate-300 mb-1"
-              >
-                Webhook URL
-              </label>
-              <input
-                id="settings-webhook-url"
-                type="url"
-                value={form.webhook_url ?? ''}
-                onChange={(e) => setForm({ ...form, webhook_url: e.target.value })}
-                placeholder="https://discord.com/api/webhooks/..."
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="settings-webhook-on"
-                className="block text-xs font-medium text-slate-300 mb-1"
-              >
-                Notify On
-              </label>
-              <select
-                id="settings-webhook-on"
-                value={form.webhook_on || 'failure'}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    webhook_on: e.target.value as 'failure' | 'always' | 'off',
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
-              >
-                <option value="failure">On failure only</option>
-                <option value="always">Always (all runs)</option>
-                <option value="off">Disabled</option>
-              </select>
-            </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {(
+              [
+                {
+                  id: 'generic',
+                  title: 'Webhook',
+                  desc: 'Discord, Slack, or HTTP JSON',
+                },
+                {
+                  id: 'telegram',
+                  title: 'Telegram Bot',
+                  desc: 'Bot Token + Chat ID (no URL needed)',
+                },
+                {
+                  id: 'ntfy',
+                  title: 'Ntfy',
+                  desc: 'Self-hosted or ntfy.sh topic',
+                },
+              ] as const
+            ).map((opt) => {
+              const active = (form.webhook_type || 'generic') === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setForm({ ...form, webhook_type: opt.id })}
+                  className={`p-3 rounded-xl border text-left transition-colors ${
+                    active
+                      ? 'bg-sky-500/15 border-sky-500/60 text-slate-100'
+                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="text-xs font-semibold">{opt.title}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">{opt.desc}</div>
+                </button>
+              );
+            })}
           </div>
+
+          {(form.webhook_type || 'generic') === 'telegram' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label
+                    htmlFor="settings-telegram-bot-token"
+                    className="text-xs font-medium text-slate-300"
+                  >
+                    Telegram Bot Token *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowTelegramToken((v) => !v)}
+                    className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200"
+                  >
+                    {showTelegramToken ? (
+                      <EyeOff className="w-3 h-3" />
+                    ) : (
+                      <Eye className="w-3 h-3" />
+                    )}
+                    {showTelegramToken ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  id="settings-telegram-bot-token"
+                  type={showTelegramToken ? 'text' : 'password'}
+                  value={form.telegram_bot_token ?? ''}
+                  onChange={(e) => setForm({ ...form, telegram_bot_token: e.target.value })}
+                  placeholder="123456789:ABCdefGHIjklMNO..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
+                />
+                {form.telegram_bot_token === '••••••••' && (
+                  <p className="text-[11px] text-emerald-400 mt-1">
+                    Stored securely (leave unchanged to keep)
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="settings-telegram-chat-id"
+                  className="block text-xs font-medium text-slate-300 mb-1"
+                >
+                  Telegram Chat ID *
+                </label>
+                <input
+                  id="settings-telegram-chat-id"
+                  value={form.telegram_chat_id ?? ''}
+                  onChange={(e) => setForm({ ...form, telegram_chat_id: e.target.value })}
+                  placeholder="e.g. -1001234567890 or 123456789"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="settings-webhook-on"
+                  className="block text-xs font-medium text-slate-300 mb-1"
+                >
+                  Notify On
+                </label>
+                <select
+                  id="settings-webhook-on"
+                  value={form.webhook_on || 'failure'}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      webhook_on: e.target.value as 'failure' | 'always' | 'off',
+                    })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                >
+                  <option value="failure">On failure only</option>
+                  <option value="always">Always (all runs)</option>
+                  <option value="off">Disabled</option>
+                </select>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+              <div className="sm:col-span-2">
+                <label
+                  htmlFor="settings-webhook-url"
+                  className="block text-xs font-medium text-slate-300 mb-1"
+                >
+                  {(form.webhook_type || 'generic') === 'ntfy' ? 'Ntfy Topic URL' : 'Webhook URL'}
+                </label>
+                <input
+                  id="settings-webhook-url"
+                  type="url"
+                  value={form.webhook_url ?? ''}
+                  onChange={(e) => setForm({ ...form, webhook_url: e.target.value })}
+                  placeholder={
+                    (form.webhook_type || 'generic') === 'ntfy'
+                      ? 'https://ntfy.sh/my-backup-topic'
+                      : 'https://discord.com/api/webhooks/...'
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="settings-webhook-on"
+                  className="block text-xs font-medium text-slate-300 mb-1"
+                >
+                  Notify On
+                </label>
+                <select
+                  id="settings-webhook-on"
+                  value={form.webhook_on || 'failure'}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      webhook_on: e.target.value as 'failure' | 'always' | 'off',
+                    })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                >
+                  <option value="failure">On failure only</option>
+                  <option value="always">Always (all runs)</option>
+                  <option value="off">Disabled</option>
+                </select>
+              </div>
+            </div>
+          )}
+
           <div>
             <button
               type="button"
-              disabled={testingWebhook || !(form.webhook_url ?? '').trim()}
+              disabled={
+                testingWebhook ||
+                ((form.webhook_type || 'generic') === 'telegram'
+                  ? (!(form.telegram_bot_token ?? '').trim() && !(form.webhook_url ?? '').trim()) ||
+                    !(form.telegram_chat_id ?? '').trim()
+                  : !(form.webhook_url ?? '').trim())
+              }
               onClick={() => void handleTestWebhook()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
             >
@@ -530,7 +710,69 @@ export function SettingsPage({
             Update Password
           </button>
         </div>
+
+        <div className="pt-4 border-t border-slate-800 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-emerald-400" />
+                Active Login Sessions ({sessions.length})
+              </h4>
+              <p className="text-xs text-slate-400">
+                Sessions currently authenticated with your administrator account.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={!sessions.some((s) => !s.current)}
+              onClick={() => setConfirmRevokeOthers(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 disabled:opacity-40"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Sign Out Other Devices
+            </button>
+          </div>
+
+          {loadingSessions && sessions.length === 0 ? (
+            <div className="text-xs text-slate-500">Loading active sessions...</div>
+          ) : sessions.length === 0 ? (
+            <div className="text-xs text-slate-500">No active sessions found.</div>
+          ) : (
+            <div className="divide-y divide-slate-800/80 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
+              {sessions.map((s) => (
+                <div
+                  key={s.id}
+                  className="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-slate-200">Session {s.id}</span>
+                    {s.current && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        Current Device
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-400 tabular-nums">
+                    Signed in: {formatDateTime(s.created_at)} · Expires:{' '}
+                    {formatDateTime(s.expires_at)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </form>
+
+      {confirmRevokeOthers && (
+        <ConfirmModal
+          title="Sign Out Other Devices"
+          message="Revoke all other active login sessions for your account? This browser will remain signed in."
+          confirmLabel="Sign Out Others"
+          busy={revokingOthers}
+          onCancel={() => setConfirmRevokeOthers(false)}
+          onConfirm={() => void handleRevokeOtherSessions()}
+        />
+      )}
 
       {systemInfo && (
         <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">

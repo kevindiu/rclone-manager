@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -126,15 +127,14 @@ func (s *Server) handleRunJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
 		DryRun bool `json:"dry_run"`
+		Resync bool `json:"resync"`
 	}
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
-			return
-		}
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
 	}
 
-	run, err := s.svc.RunJob(r.Context(), id, req.DryRun)
+	run, err := s.svc.RunJobWithResync(r.Context(), id, req.DryRun, req.Resync)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "job not found")
 		return
@@ -148,6 +148,28 @@ func (s *Server) handleRunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)
+}
+
+func (s *Server) handlePreviewJobCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Job    domain.Job `json:"job"`
+		DryRun bool       `json:"dry_run"`
+		Resync bool       `json:"resync"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
+	}
+	cmd, err := s.svc.PreviewJobCommand(r.Context(), req.Job, req.DryRun, req.Resync)
+	if errors.Is(err, service.ErrValidation) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "preview job command failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"command": cmd})
 }
 
 func (s *Server) handleStopJob(w http.ResponseWriter, r *http.Request) {

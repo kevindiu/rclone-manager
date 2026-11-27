@@ -960,3 +960,159 @@ func TestAPIMalformedJSONAndPathTraversal(t *testing.T) {
 		t.Fatal("expected traversal download request to fail, got 200 OK")
 	}
 }
+
+func TestAPINewEndpointsAndInlinePreview(t *testing.T) {
+	_, ts, dir := setupTestServer(t)
+	client := setupAuthenticatedClient(t, ts)
+
+	// Preview command endpoint
+	prevBody := `{"job":{"name":"Prev","operation":"bisync","source":"/src","destination":"r2:dst","min_age":"2h"},"dry_run":true,"resync":true}`
+	prevResp, err := client.Post(ts.URL+"/api/jobs/preview-command", "application/json", strings.NewReader(prevBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prevRes struct {
+		Command string `json:"command"`
+	}
+	_ = json.NewDecoder(prevResp.Body).Decode(&prevRes)
+	_ = prevResp.Body.Close()
+	if prevResp.StatusCode != http.StatusOK || !strings.Contains(prevRes.Command, "bisync") || !strings.Contains(prevRes.Command, "--resync") {
+		t.Fatalf("unexpected preview response: status=%d cmd=%q", prevResp.StatusCode, prevRes.Command)
+	}
+
+	// Daily run stats & clear finished runs
+	statsResp, err := client.Get(ts.URL + "/api/runs/stats?days=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stats []domain.DailyRunStat
+	_ = json.NewDecoder(statsResp.Body).Decode(&stats)
+	_ = statsResp.Body.Close()
+	if statsResp.StatusCode != http.StatusOK || len(stats) != 7 {
+		t.Fatalf("unexpected run stats: status=%d len=%d", statsResp.StatusCode, len(stats))
+	}
+
+	clrReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/runs?status=success", nil)
+	clrResp, err := client.Do(clrReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = clrResp.Body.Close()
+	if clrResp.StatusCode != http.StatusOK {
+		t.Fatalf("clear runs status = %d", clrResp.StatusCode)
+	}
+
+	// Active sessions & revoke others
+	c2 := newCookieClient(t)
+	loginResp, err := c2.Post(ts.URL+"/api/auth/login", "application/json", strings.NewReader(`{"username":"admin","password":"SuperSecret123!"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = loginResp.Body.Close()
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("c2 login = %d", loginResp.StatusCode)
+	}
+
+	sessResp, err := client.Get(ts.URL + "/api/auth/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions []service.SessionInfo
+	_ = json.NewDecoder(sessResp.Body).Decode(&sessions)
+	_ = sessResp.Body.Close()
+	if sessResp.StatusCode != http.StatusOK || len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got status=%d sessions=%+v", sessResp.StatusCode, sessions)
+	}
+
+	revResp, err := client.Post(ts.URL+"/api/auth/sessions/revoke-others", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = revResp.Body.Close()
+	if revResp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke-others = %d", revResp.StatusCode)
+	}
+	c2Check, err := c2.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c2Check.Body.Close()
+	if c2Check.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected revoked c2 session to get 401, got %d", c2Check.StatusCode)
+	}
+
+	// Inline safe Content-Type vs XSS block + bulk delete
+	root := filepath.Join(dir, "preview-root")
+	_ = os.MkdirAll(filepath.Join(root, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "readme.txt"), []byte("hello"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "page.html"), []byte("<script>alert(1)</script>"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "sub", "a.txt"), []byte("a"), 0o644)
+
+	remPayload, _ := json.Marshal(map[string]any{
+		"name":   "prevremote",
+		"type":   "alias",
+		"params": map[string]string{"remote": root},
+	})
+	remResp, err := client.Post(ts.URL+"/api/remotes", "application/json", bytes.NewReader(remPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = remResp.Body.Close()
+
+	txtResp, err := client.Get(ts.URL + "/api/browse/download?remote=prevremote&path=readme.txt&inline=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = txtResp.Body.Close()
+	if txtResp.StatusCode != http.StatusOK || !strings.HasPrefix(txtResp.Header.Get("Content-Type"), "text/plain") || !strings.HasPrefix(txtResp.Header.Get("Content-Disposition"), "inline") {
+		t.Fatalf("unexpected .txt inline headers: status=%d ct=%q cd=%q", txtResp.StatusCode, txtResp.Header.Get("Content-Type"), txtResp.Header.Get("Content-Disposition"))
+	}
+
+	htmlResp, err := client.Get(ts.URL + "/api/browse/download?remote=prevremote&path=page.html&inline=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = htmlResp.Body.Close()
+	if htmlResp.StatusCode != http.StatusOK || htmlResp.Header.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(htmlResp.Header.Get("Content-Disposition"), "attachment") {
+		t.Fatalf("html must NOT be served inline: status=%d ct=%q cd=%q", htmlResp.StatusCode, htmlResp.Header.Get("Content-Type"), htmlResp.Header.Get("Content-Disposition"))
+	}
+
+	bulkPayload := `{"remote":"prevremote","entries":[{"path":"readme.txt","is_dir":false},{"path":"sub","is_dir":true}]}`
+	bulkResp, err := client.Post(ts.URL+"/api/browse/bulk-delete", "application/json", strings.NewReader(bulkPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bulkRes struct {
+		Deleted int   `json:"deleted"`
+		Failed  []any `json:"failed"`
+	}
+	_ = json.NewDecoder(bulkResp.Body).Decode(&bulkRes)
+	_ = bulkResp.Body.Close()
+	if bulkResp.StatusCode != http.StatusOK || bulkRes.Deleted != 2 || len(bulkRes.Failed) != 0 {
+		t.Fatalf("unexpected bulk-delete result: status=%d res=%+v", bulkResp.StatusCode, bulkRes)
+	}
+
+	// Saving Telegram bot token masks token in PUT & GET responses while retaining secret server-side.
+	tgReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", strings.NewReader(`{"transfers":4,"checkers":8,"timezone":"UTC","max_concurrent_jobs":2,"webhook_type":"telegram","telegram_bot_token":"123456:REAL-BOT-SECRET","telegram_chat_id":"-100777"}`))
+	tgReq.Header.Set("Content-Type", "application/json")
+	tgResp, err := client.Do(tgReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var savedSettings domain.GlobalSettings
+	_ = json.NewDecoder(tgResp.Body).Decode(&savedSettings)
+	_ = tgResp.Body.Close()
+	if tgResp.StatusCode != http.StatusOK || savedSettings.TelegramBotToken != rclone.MaskedSecret {
+		t.Fatalf("expected masked telegram_bot_token on PUT, got status=%d token=%q", tgResp.StatusCode, savedSettings.TelegramBotToken)
+	}
+	getSettingsResp, err := client.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetchedSettings domain.GlobalSettings
+	_ = json.NewDecoder(getSettingsResp.Body).Decode(&fetchedSettings)
+	_ = getSettingsResp.Body.Close()
+	if fetchedSettings.TelegramBotToken != rclone.MaskedSecret || fetchedSettings.WebhookType != "telegram" || fetchedSettings.TelegramChatID != "-100777" {
+		t.Fatalf("unexpected masked GET /api/settings: %+v", fetchedSettings)
+	}
+}

@@ -251,6 +251,86 @@ func (s *Server) handleBrowseDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+func (s *Server) handleBrowseBulkDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Remote  string `json:"remote"`
+		Entries []struct {
+			Path  string `json:"path"`
+			IsDir bool   `json:"is_dir"`
+		} `json:"entries"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload: "+err.Error())
+		return
+	}
+	req.Remote = strings.TrimSpace(req.Remote)
+	if req.Remote == "" || len(req.Entries) == 0 {
+		writeError(w, http.StatusBadRequest, "remote and non-empty entries are required")
+		return
+	}
+	if len(req.Entries) > 200 {
+		writeError(w, http.StatusBadRequest, "bulk delete supports at most 200 entries per request")
+		return
+	}
+	for _, entry := range req.Entries {
+		if strings.TrimSpace(entry.Path) == "" {
+			writeError(w, http.StatusBadRequest, "every entry must include a path")
+			return
+		}
+	}
+	if err := s.client.EnsureRemoteExists(r.Context(), req.Remote); err != nil {
+		if errors.Is(err, rclone.ErrRemoteNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	type bulkFailure struct {
+		Path  string `json:"path"`
+		Error string `json:"error"`
+	}
+	deleted := 0
+	failed := make([]bulkFailure, 0)
+	for _, entry := range req.Entries {
+		if err := s.client.DeletePath(r.Context(), req.Remote, entry.Path, entry.IsDir); err != nil {
+			failed = append(failed, bulkFailure{Path: entry.Path, Error: err.Error()})
+		} else {
+			deleted++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted": deleted,
+		"failed":  failed,
+	})
+}
+
+func safeInlineContentType(filename string) (string, bool) {
+	ext := strings.ToLower(path.Ext(filename))
+	switch ext {
+	case ".png":
+		return "image/png", true
+	case ".jpg", ".jpeg":
+		return "image/jpeg", true
+	case ".gif":
+		return "image/gif", true
+	case ".webp":
+		return "image/webp", true
+	case ".pdf":
+		return "application/pdf", true
+	case ".txt", ".md", ".log", ".json", ".yaml", ".yml", ".toml", ".ini", ".conf", ".cfg",
+		".csv", ".xml", ".sh", ".bash", ".zsh", ".go", ".ts", ".tsx", ".js", ".jsx",
+		".py", ".rs", ".c", ".h", ".cpp", ".java", ".css", ".sql", ".env", ".gitignore":
+		return "text/plain; charset=utf-8", true
+	}
+	base := strings.ToLower(path.Base(filename))
+	if base == "dockerfile" || base == "makefile" || base == ".gitignore" || base == ".env" {
+		return "text/plain; charset=utf-8", true
+	}
+	return "", false
+}
+
 func (s *Server) handleBrowseDownload(w http.ResponseWriter, r *http.Request) {
 	remote := strings.TrimSpace(r.URL.Query().Get("remote"))
 	subpath := r.URL.Query().Get("path")
@@ -279,12 +359,22 @@ func (s *Server) handleBrowseDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	filename = strings.NewReplacer("\r", "", "\n", "").Replace(filename)
 
-	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
-	if disposition == "" {
-		disposition = "attachment"
+	contentType := "application/octet-stream"
+	dispType := "attachment"
+	inlineReq := r.URL.Query().Get("inline") == "1" || strings.EqualFold(r.URL.Query().Get("inline"), "true")
+	if inlineReq {
+		if safeType, ok := safeInlineContentType(filename); ok {
+			contentType = safeType
+			dispType = "inline"
+		}
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
+	disposition := mime.FormatMediaType(dispType, map[string]string{"filename": filename})
+	if disposition == "" {
+		disposition = dispType
+	}
+
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", disposition)
 	if stat.Size >= 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size))

@@ -124,6 +124,17 @@ func (m *mockAuthStore) DeleteUserSessionsExcept(_ context.Context, userID, keep
 	return nil
 }
 
+func (m *mockAuthStore) ListUserSessions(_ context.Context, userID string) ([]domain.Session, error) {
+	now := time.Now().UTC()
+	var out []domain.Session
+	for _, s := range m.sessions {
+		if s.UserID == userID && s.ExpiresAt.After(now) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
 func (m *mockAuthStore) PruneExpiredSessions(_ context.Context) (int64, error) {
 	now := time.Now().UTC()
 	var pruned int64
@@ -310,5 +321,47 @@ func TestAuthServiceResetPassword(t *testing.T) {
 	}
 	if _, err := svc.Login(ctx, "127.0.0.1", "admin", "RecoveredPass123!"); err != nil {
 		t.Fatalf("Login with reset password failed: %v", err)
+	}
+}
+
+func TestAuthServiceListAndRevokeOtherSessions(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newTestAuthService()
+
+	res1, err := svc.SetupInitialAdmin(ctx, "admin", "InitialPass123!")
+	if err != nil {
+		t.Fatalf("SetupInitialAdmin: %v", err)
+	}
+	res2, err := svc.Login(ctx, "10.0.0.5", "admin", "InitialPass123!")
+	if err != nil {
+		t.Fatalf("second Login: %v", err)
+	}
+
+	tok1Hash := auth.HashSessionToken(res1.RawToken)
+	sessions, err := svc.ListSessions(ctx, res1.User.ID, tok1Hash)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", len(sessions))
+	}
+	currentCount := 0
+	for _, s := range sessions {
+		if s.Current {
+			currentCount++
+		}
+	}
+	if currentCount != 1 {
+		t.Fatalf("expected exactly 1 current session, got %d (%+v)", currentCount, sessions)
+	}
+
+	if err := svc.RevokeOtherSessions(ctx, res1.User.ID, tok1Hash); err != nil {
+		t.Fatalf("RevokeOtherSessions: %v", err)
+	}
+	if _, _, err := svc.Authenticate(ctx, res1.RawToken); err != nil {
+		t.Fatalf("expected current session to remain valid, got %v", err)
+	}
+	if _, _, err := svc.Authenticate(ctx, res2.RawToken); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected other session revoked, got %v", err)
 	}
 }

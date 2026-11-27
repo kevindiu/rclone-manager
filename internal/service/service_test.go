@@ -98,6 +98,22 @@ func (m *mockStore) DeleteRun(_ context.Context, id string) error {
 	delete(m.runs, id)
 	return nil
 }
+func (m *mockStore) DeleteFinishedRuns(_ context.Context, jobID, status, trigger string) (int64, error) {
+	var deleted int64
+	for id, r := range m.runs {
+		if r.Status == "running" || r.Status == "queued" {
+			continue
+		}
+		if (jobID == "" || r.JobID == jobID) && (status == "" || r.Status == status) && (trigger == "" || r.Trigger == trigger) {
+			delete(m.runs, id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+func (m *mockStore) GetDailyRunStats(_ context.Context, days int) ([]domain.DailyRunStat, error) {
+	return []domain.DailyRunStat{{Date: "2026-11-27", SuccessCount: 1, BytesTransferred: 1024}}, nil
+}
 
 type mockRunner struct {
 	maxConcurrent int
@@ -210,16 +226,30 @@ func TestUpdateSettingsAndImportBundleValidation(t *testing.T) {
 	if err := svc.TestWebhook(ctx, ""); !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected ErrValidation when testing empty webhook URL, got %v", err)
 	}
-	var testedURL string
-	svc.webhookTestSender = func(_ context.Context, webhookURL string) error {
-		testedURL = webhookURL
+	var testedSettings domain.GlobalSettings
+	svc.webhookSettingsTester = func(_ context.Context, settings domain.GlobalSettings) error {
+		testedSettings = settings
 		return nil
 	}
-	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookURL: "https://hooks.example.com/1", WebhookOn: "always"}); err != nil {
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookURL: "https://hooks.example.com/1", WebhookOn: "always", WebhookType: "ntfy"}); err != nil {
 		t.Fatalf("UpdateSettings valid webhook failed: %v", err)
 	}
-	if err := svc.TestWebhook(ctx, ""); err != nil || testedURL != "https://hooks.example.com/1" {
-		t.Fatalf("TestWebhook fallback to saved settings failed: err=%v testedURL=%q", err, testedURL)
+	if err := svc.TestWebhook(ctx, ""); err != nil || testedSettings.WebhookURL != "https://hooks.example.com/1" || testedSettings.WebhookType != "ntfy" {
+		t.Fatalf("TestWebhook fallback to saved settings failed: err=%v testedSettings=%+v", err, testedSettings)
+	}
+	if err := svc.TestWebhookSettings(ctx, "https://api.telegram.org/botx/sendMessage", "telegram", "", ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation when telegram chat ID missing, got %v", err)
+	}
+	if err := svc.TestWebhookSettings(ctx, "", "telegram", "123456:TOKEN", "-100123"); err != nil || testedSettings.TelegramBotToken != "123456:TOKEN" || testedSettings.TelegramChatID != "-100123" {
+		t.Fatalf("TestWebhookSettings with bot token failed: err=%v testedSettings=%+v", err, testedSettings)
+	}
+	// Saving masked TelegramBotToken preserves existing stored token.
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookType: "telegram", TelegramBotToken: "999:SECRET", TelegramChatID: "-100999"}); err != nil {
+		t.Fatalf("UpdateSettings telegram failed: %v", err)
+	}
+	preserved, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "UTC", WebhookType: "telegram", TelegramBotToken: rclone.MaskedSecret, TelegramChatID: "-100999"})
+	if err != nil || preserved.TelegramBotToken != "999:SECRET" {
+		t.Fatalf("expected masked TelegramBotToken preserved, got %+v err=%v", preserved, err)
 	}
 }
 
@@ -356,7 +386,11 @@ func TestValidateJobAndJobsLifecycle(t *testing.T) {
 		{Name: "", Source: "/a", Destination: "/b"},
 		{Name: "NoSrc", Source: "", Destination: "/b"},
 		{Name: "NoDst", Source: "/a", Destination: ""},
-		{Name: "BadOp", Source: "/a", Destination: "/b", Operation: "bisync"},
+		{Name: "BadOp", Source: "/a", Destination: "/b", Operation: "invalid_op"},
+		{Name: "BadDelTiming", Source: "/a", Destination: "/b", DeleteTiming: "later"},
+		{Name: "BadSymlink", Source: "/a", Destination: "/b", SymlinkMode: "hardlink"},
+		{Name: "BadBisync", Source: "/a", Destination: "/b", BisyncConflictResolve: "random"},
+		{Name: "BadNotify", Source: "/a", Destination: "/b", NotifyOverride: "sometimes"},
 		{Name: "BadCron", Source: "/a", Destination: "/b", Schedule: "bad cron"},
 		{Name: "BadCutoff", Source: "/a", Destination: "/b", CutoffMode: "instant"},
 		{Name: "BadFlag", Source: "/a", Destination: "/b", CustomFlags: "--rc"},
@@ -396,11 +430,26 @@ func TestValidateJobAndJobsLifecycle(t *testing.T) {
 	if _, err := svc.UpdateJob(ctx, created.ID, *created); err != nil {
 		t.Fatalf("UpdateJob copy failed: %v", err)
 	}
-	for _, validOp := range []string{"move", "check"} {
+	for _, validOp := range []string{"move", "check", "bisync"} {
 		j := domain.Job{Name: "Op-" + validOp, Operation: validOp, Source: "/src", Destination: "r2:dst"}
 		if err := ValidateJob(&j); err != nil {
 			t.Fatalf("ValidateJob(%s) failed: %v", validOp, err)
 		}
+	}
+
+	previewCmd, err := svc.PreviewJobCommand(ctx, domain.Job{
+		Name:                  "Preview Bisync",
+		Operation:             "bisync",
+		Source:                "/local",
+		Destination:           "r2:sync",
+		BisyncConflictResolve: "newer",
+		MinAge:                "1h",
+	}, true, true)
+	if err != nil {
+		t.Fatalf("PreviewJobCommand failed: %v", err)
+	}
+	if !strings.Contains(previewCmd, "rclone ") || !strings.Contains(previewCmd, "bisync") || !strings.Contains(previewCmd, "--resync") || !strings.Contains(previewCmd, "--dry-run") {
+		t.Fatalf("unexpected PreviewJobCommand output: %s", previewCmd)
 	}
 	updated, err := svc.UpdateJob(ctx, created.ID, *created)
 	if err != nil || updated.Name != "Docs Copy" {

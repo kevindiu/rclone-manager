@@ -2,6 +2,7 @@ import {
   ChevronRight,
   CornerLeftUp,
   Download,
+  Eye,
   File,
   Folder,
   FolderPlus,
@@ -31,6 +32,8 @@ import type {
   RemoteInfo,
 } from '../../types/api';
 import { formatBytes, formatDateTime } from '../../utils/format';
+import { PathPickerModal } from '../jobs/PathPickerModal';
+import { FilePreviewModal, isPreviewableFile } from './FilePreviewModal';
 import { RestoreModal } from './RestoreModal';
 import { VersionHistoryModal } from './VersionHistoryModal';
 
@@ -87,6 +90,14 @@ export function BrowsePage({
     entry: BrowseEntry;
     fullPath: string;
   } | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<{
+    entry: BrowseEntry;
+    fullPath: string;
+  } | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showBulkRestorePicker, setShowBulkRestorePicker] = useState(false);
 
   useEffect(() => {
     if (initialRemote) {
@@ -117,6 +128,7 @@ export function BrowsePage({
 
   useEffect(() => {
     setDirSize(null);
+    setSelectedPaths(new Set());
     if (remote) void loadDir(remote, subpath);
   }, [remote, subpath, loadDir]);
 
@@ -132,9 +144,88 @@ export function BrowsePage({
   }, [entries, query]);
 
   const crumbs = subpath ? subpath.split('/').filter(Boolean) : [];
-  const fullEntryPath = (name: string) => (subpath ? `${subpath}/${name}` : name);
+  const fullEntryPath = useCallback(
+    (name: string) => (subpath ? `${subpath}/${name}` : name),
+    [subpath]
+  );
   const insideVersionsDir =
     subpath === '_versions' || subpath.startsWith('_versions/') || subpath.includes('/_versions');
+
+  const selectedEntries = useMemo(
+    () =>
+      filtered
+        .map((entry) => ({ entry, fullPath: fullEntryPath(entry.Name) }))
+        .filter((item) => selectedPaths.has(item.fullPath)),
+    [filtered, fullEntryPath, selectedPaths]
+  );
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((e) => selectedPaths.has(fullEntryPath(e.Name)));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedPaths(new Set());
+      return;
+    }
+    setSelectedPaths(new Set(filtered.map((e) => fullEntryPath(e.Name))));
+  };
+
+  const toggleSelectOne = (fullPath: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(fullPath)) next.delete(fullPath);
+      else next.add(fullPath);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (!remote || selectedEntries.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      const res = await api.browseBulkDelete(
+        remote,
+        selectedEntries.map((item) => ({ path: item.fullPath, is_dir: item.entry.IsDir }))
+      );
+      if (res.failed.length > 0) {
+        onToast(`Deleted ${res.deleted} item(s); ${res.failed.length} failed`, true);
+      } else {
+        onToast(`Deleted ${res.deleted} selected item(s)`);
+      }
+      setConfirmBulkDelete(false);
+      setSelectedPaths(new Set());
+      void loadDir(remote, subpath);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Bulk delete failed', true);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const handleBulkRestoreTarget = async (pickedDir: string) => {
+    if (!remote || selectedEntries.length === 0) return;
+    let started = 0;
+    let failed = 0;
+    for (const item of selectedEntries) {
+      const target = pickedDir.endsWith(':')
+        ? `${pickedDir}${item.entry.Name}`
+        : `${pickedDir.replace(/\/+$/, '')}/${item.entry.Name}`;
+      try {
+        await api.restore(remote, item.fullPath, target, item.entry.IsDir, {
+          conflict_mode: 'overwrite',
+        });
+        started++;
+      } catch {
+        failed++;
+      }
+    }
+    setSelectedPaths(new Set());
+    if (failed > 0) {
+      onToast(`Started ${started} restore(s); ${failed} failed to start`, true);
+    } else {
+      onToast(`Started ${started} restore job(s) to ${pickedDir}`);
+    }
+  };
 
   const handleRestoreStarted = (run: JobRun) => {
     onToast(
@@ -388,6 +479,37 @@ export function BrowsePage({
         </div>
       )}
 
+      {selectedEntries.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-xs">
+          <span className="font-medium text-sky-200">{selectedEntries.length} selected</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowBulkRestorePicker(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-medium"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Restore Selected
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmBulkDelete(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-medium"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete Selected
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedPaths(new Set())}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl bg-slate-900/90 border border-slate-800 divide-y divide-slate-800/70 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-slate-400 gap-2">
@@ -421,6 +543,17 @@ export function BrowsePage({
           </>
         ) : (
           <>
+            <div className="px-4 py-2 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400">
+              <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded accent-sky-500"
+                />
+                <span>Select all ({filtered.length})</span>
+              </label>
+            </div>
             {subpath !== '' && !query.trim() && (
               <button
                 type="button"
@@ -434,12 +567,23 @@ export function BrowsePage({
             {filtered.map((entry) => {
               const fPath = fullEntryPath(entry.Name);
               const isVersionDir = entry.IsDir && entry.Name === '_versions';
+              const previewable = isPreviewableFile(entry);
+              const isSelected = selectedPaths.has(fPath);
               return (
                 <div
                   key={entry.Path || entry.Name}
-                  className="px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-800/40 transition-colors"
+                  className={`px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-800/40 transition-colors ${
+                    isSelected ? 'bg-sky-500/5' : ''
+                  }`}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${entry.Name}`}
+                      checked={isSelected}
+                      onChange={() => toggleSelectOne(fPath)}
+                      className="w-4 h-4 rounded accent-sky-500 shrink-0"
+                    />
                     {entry.IsDir ? (
                       <Folder
                         className={`w-4 h-4 shrink-0 ${
@@ -464,6 +608,15 @@ export function BrowsePage({
                             </span>
                           )}
                         </button>
+                      ) : previewable ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewTarget({ entry, fullPath: fPath })}
+                          className="text-sm text-slate-100 hover:text-sky-400 truncate text-left block max-w-full"
+                          title="Preview file"
+                        >
+                          {entry.Name}
+                        </button>
                       ) : (
                         <div className="text-sm text-slate-100 truncate">{entry.Name}</div>
                       )}
@@ -475,6 +628,16 @@ export function BrowsePage({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {previewable && (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTarget({ entry, fullPath: fPath })}
+                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300"
+                        title="Preview file"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {!isVersionDir && !insideVersionsDir && (
                       <button
                         type="button"
@@ -648,6 +811,33 @@ export function BrowsePage({
           fullPath={versionTarget.fullPath}
           onRestoreVersion={(vEntry, vPath) => setRestoreTarget({ entry: vEntry, fullPath: vPath })}
           onClose={() => setVersionTarget(null)}
+        />
+      )}
+
+      {previewTarget && (
+        <FilePreviewModal
+          remote={remote}
+          entry={previewTarget.entry}
+          fullPath={previewTarget.fullPath}
+          onClose={() => setPreviewTarget(null)}
+        />
+      )}
+
+      {confirmBulkDelete && (
+        <ConfirmModal
+          title="Delete Selected Items"
+          message={`Permanently delete ${selectedEntries.length} selected item(s) from "${remote}"? Selected folders will be deleted recursively.`}
+          busy={bulkDeleting}
+          onCancel={() => setConfirmBulkDelete(false)}
+          onConfirm={() => void handleBulkDeleteConfirm()}
+        />
+      )}
+
+      {showBulkRestorePicker && (
+        <PathPickerModal
+          remotes={remotes}
+          onSelect={(pickedDir) => void handleBulkRestoreTarget(pickedDir)}
+          onClose={() => setShowBulkRestorePicker(false)}
         />
       )}
     </div>

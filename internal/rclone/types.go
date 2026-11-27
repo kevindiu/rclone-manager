@@ -110,3 +110,11 @@ type DirSize struct {
 	Count int64 `json:"count"`
 	Bytes int64 `json:"bytes"`
 }
+
+// DedupeResult reports output from `rclone dedupe`.
+type DedupeResult struct {
+	Remote string `json:"remote"`
+	Mode   string `json:"mode"`
+	DryRun bool   `json:"dry_run"`
+	Output string `json:"output"`
+}

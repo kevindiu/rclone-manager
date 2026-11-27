@@ -46,6 +46,9 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   max_concurrent_jobs: 2,
   webhook_url: '',
   webhook_on: 'failure',
+  webhook_type: 'generic',
+  telegram_bot_token: '',
+  telegram_chat_id: '',
 };
 
 export function App() {

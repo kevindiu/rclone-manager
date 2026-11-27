@@ -223,3 +223,81 @@ func TestBuildRcloneArgsMoveCheckAndCommonFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRcloneArgsBisyncFiltersAndTiming(t *testing.T) {
+	defaults := domain.GlobalSettings{Transfers: 4, Checkers: 8}
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	maxDel := 5
+
+	bisyncArgs, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:             "bisync",
+		Source:                "/local/docs",
+		Destination:           "r2:docs",
+		BisyncResync:          true,
+		BisyncConflictResolve: "newer",
+		SymlinkMode:           "links",
+		SizeOnly:              true,
+		UpdateOnly:            true,
+		IgnoreExisting:        true,
+		VersioningEnabled:     true,
+		MaxDelete:             &maxDel,
+		MinAge:                "1h",
+		MaxAge:                "30d",
+		MinSize:               "10k",
+		MaxSize:               "1G",
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatalf("BuildRcloneArgs bisync failed: %v", err)
+	}
+	for _, want := range []string{"bisync", "--resync", "--links", "--size-only"} {
+		if !slices.Contains(bisyncArgs, want) {
+			t.Errorf("expected %q in bisync args: %v", want, bisyncArgs)
+		}
+	}
+	for _, pair := range [][2]string{
+		{"--conflict-resolve", "newer"},
+		{"--min-age", "1h"},
+		{"--max-age", "30d"},
+		{"--min-size", "10k"},
+		{"--max-size", "1G"},
+	} {
+		if !containsFlagPair(bisyncArgs, pair[0], pair[1]) {
+			t.Errorf("expected %s %s in bisync args: %v", pair[0], pair[1], bisyncArgs)
+		}
+	}
+	for _, forbidden := range []string{"--backup-dir", "--max-delete", "--update", "--ignore-existing"} {
+		if slices.Contains(bisyncArgs, forbidden) {
+			t.Errorf("bisync must omit %q: %v", forbidden, bisyncArgs)
+		}
+	}
+
+	syncArgs, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:      "sync",
+		Source:         "/a",
+		Destination:    "/b",
+		DeleteTiming:   "after",
+		SymlinkMode:    "copy_links",
+		IgnoreExisting: true,
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatalf("BuildRcloneArgs sync timing failed: %v", err)
+	}
+	for _, want := range []string{"--delete-after", "--copy-links", "--ignore-existing"} {
+		if !slices.Contains(syncArgs, want) {
+			t.Errorf("expected %q in sync args: %v", want, syncArgs)
+		}
+	}
+
+	moveArgs, _, _, err := BuildRcloneArgs(domain.Job{
+		Operation:          "move",
+		Source:             "/a",
+		Destination:        "/b",
+		DeleteEmptySrcDirs: true,
+	}, defaults, "/cfg/rclone.conf", false, now)
+	if err != nil {
+		t.Fatalf("BuildRcloneArgs move empty dirs failed: %v", err)
+	}
+	if !slices.Contains(moveArgs, "--delete-empty-src-dirs") {
+		t.Errorf("expected --delete-empty-src-dirs in move args: %v", moveArgs)
+	}
+}
