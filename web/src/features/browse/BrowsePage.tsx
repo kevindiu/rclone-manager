@@ -29,6 +29,7 @@ import type {
   ActiveRunSnapshot,
   BrowseEntry,
   DirSize,
+  GlobalSettings,
   JobRun,
   JobWithStatus,
   RemoteInfo,
@@ -37,6 +38,7 @@ import { formatBytes, formatDateTime } from '../../utils/format';
 import {
   buildUploadQueueFromFileList,
   collectDroppedEntries,
+  partitionUploadBatches,
   type QueuedUpload,
 } from '../../utils/upload';
 import { PathPickerModal } from '../jobs/PathPickerModal';
@@ -48,6 +50,7 @@ export function BrowsePage({
   remotes,
   jobs,
   activeRuns,
+  settings,
   initialRemote,
   onNavigate,
   onViewActiveLogs,
@@ -56,6 +59,7 @@ export function BrowsePage({
   remotes: RemoteInfo[];
   jobs: JobWithStatus[];
   activeRuns: ActiveRunSnapshot[];
+  settings: GlobalSettings;
   initialRemote?: string;
   onNavigate: (tab: Tab, opts?: { remote?: string }) => void;
   onViewActiveLogs: (run: ActiveRunSnapshot) => void;
@@ -281,8 +285,8 @@ export function BrowsePage({
     let lastUploadedName = '';
     let firstError = '';
 
-    const bumpProgress = (current: string) => {
-      done += 1;
+    const bumpProgress = (current: string, count = 1) => {
+      done += count;
       setUploadProgress({ done, total, current });
     };
 
@@ -302,16 +306,48 @@ export function BrowsePage({
         bumpProgress(dir);
       }
 
-      const UPLOAD_CONCURRENCY = 3;
+      const workItems = partitionUploadBatches(queue, {
+        smallFileMaxBytes: Math.max(1, settings.upload_small_file_max_mb ?? 16) * 1024 * 1024,
+        maxFiles: Math.max(1, settings.upload_batch_max_files ?? 80),
+        maxBytes: Math.max(1, settings.upload_batch_max_mb ?? 64) * 1024 * 1024,
+      });
+      const batchItems = workItems.filter(
+        (w): w is { kind: 'batch'; items: QueuedUpload[] } => w.kind === 'batch'
+      );
+      const singleItems = workItems
+        .filter((w): w is { kind: 'single'; item: QueuedUpload } => w.kind === 'single')
+        .map((w) => w.item);
+
+      for (const batch of batchItems) {
+        if (controller.signal.aborted) break;
+        const label = `batch of ${batch.items.length} files (${batch.items[0]?.displayPath ?? ''})`;
+        setUploadProgress((prev) => (prev ? { ...prev, current: label } : prev));
+        try {
+          const res = await api.browseUploadBatch(remote, subpath, batch.items, controller.signal);
+          succeeded += res.count;
+          lastUploadedName = `${res.count} files`;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            break;
+          }
+          failed += batch.items.length;
+          if (!firstError) {
+            firstError = err instanceof Error ? err.message : 'Batch upload failed';
+          }
+        }
+        bumpProgress(label, batch.items.length);
+      }
+
+      const SINGLE_CONCURRENCY = 2;
       let nextIdx = 0;
       const workers = Array.from(
-        { length: Math.min(UPLOAD_CONCURRENCY, queue.length) },
+        { length: Math.min(SINGLE_CONCURRENCY, singleItems.length) },
         async () => {
           while (!controller.signal.aborted) {
             const idx = nextIdx;
             nextIdx += 1;
-            if (idx >= queue.length) return;
-            const item = queue[idx];
+            if (idx >= singleItems.length) return;
+            const item = singleItems[idx];
             setUploadProgress((prev) => (prev ? { ...prev, current: item.displayPath } : prev));
             try {
               const res = await api.browseUpload(

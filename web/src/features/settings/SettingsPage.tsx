@@ -35,6 +35,11 @@ function settingsEqual(a: GlobalSettings, b: GlobalSettings): boolean {
     a.log_retention_days === b.log_retention_days &&
     a.timezone === b.timezone &&
     a.max_concurrent_jobs === b.max_concurrent_jobs &&
+    (a.upload_batch_transfers ?? 16) === (b.upload_batch_transfers ?? 16) &&
+    (a.upload_batch_checkers ?? 32) === (b.upload_batch_checkers ?? 32) &&
+    (a.upload_batch_max_files ?? 80) === (b.upload_batch_max_files ?? 80) &&
+    (a.upload_batch_max_mb ?? 64) === (b.upload_batch_max_mb ?? 64) &&
+    (a.upload_small_file_max_mb ?? 16) === (b.upload_small_file_max_mb ?? 16) &&
     (a.webhook_url ?? '') === (b.webhook_url ?? '') &&
     (a.webhook_on || 'failure') === (b.webhook_on || 'failure') &&
     (a.webhook_type || 'generic') === (b.webhook_type || 'generic') &&
@@ -272,7 +277,12 @@ export function SettingsPage({
     form.contimeout !== settings.contimeout ||
     form.log_retention_days !== settings.log_retention_days ||
     form.timezone !== settings.timezone ||
-    form.max_concurrent_jobs !== settings.max_concurrent_jobs;
+    form.max_concurrent_jobs !== settings.max_concurrent_jobs ||
+    (form.upload_batch_transfers ?? 16) !== (settings.upload_batch_transfers ?? 16) ||
+    (form.upload_batch_checkers ?? 32) !== (settings.upload_batch_checkers ?? 32) ||
+    (form.upload_batch_max_files ?? 80) !== (settings.upload_batch_max_files ?? 80) ||
+    (form.upload_batch_max_mb ?? 64) !== (settings.upload_batch_max_mb ?? 64) ||
+    (form.upload_small_file_max_mb ?? 16) !== (settings.upload_small_file_max_mb ?? 16);
 
   const hasNotificationChanges =
     (form.webhook_url ?? '') !== (settings.webhook_url ?? '') ||
@@ -477,6 +487,101 @@ export function SettingsPage({
                   placeholder='e.g. "10M" or "08:00,5M 23:00,off" (blank = unlimited)'
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono text-slate-100"
                 />
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-200">Browse Batch Upload</h3>
+                  <p className="text-xs text-slate-400">
+                    Controls how the Browse page packs and uploads multiple small files via{' '}
+                    <code>rclone copy</code> (also respects Bandwidth Limit above).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Batch Transfers (<code>--transfers</code>)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={64}
+                      value={form.upload_batch_transfers ?? 16}
+                      onChange={(e) =>
+                        setForm({ ...form, upload_batch_transfers: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Batch Checkers (<code>--checkers</code>)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={128}
+                      value={form.upload_batch_checkers ?? 32}
+                      onChange={(e) =>
+                        setForm({ ...form, upload_batch_checkers: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Max Files / Batch (1 = individual)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={form.upload_batch_max_files ?? 80}
+                      onChange={(e) =>
+                        setForm({ ...form, upload_batch_max_files: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Max Batch Size (MiB)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={512}
+                      value={form.upload_batch_max_mb ?? 64}
+                      onChange={(e) =>
+                        setForm({ ...form, upload_batch_max_mb: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Small File Threshold (MiB)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={256}
+                      value={form.upload_small_file_max_mb ?? 16}
+                      onChange={(e) =>
+                        setForm({ ...form, upload_small_file_max_mb: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Larger files stream directly via <code>rcat</code>
+                    </p>
+                  </div>
+                </div>
               </div>
             </>
           )}

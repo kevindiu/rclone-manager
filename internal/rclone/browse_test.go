@@ -110,3 +110,45 @@ func TestUploadFileNestedSubpath(t *testing.T) {
 		t.Fatalf("uploaded content = %q, want %q", string(got), "nested-ok")
 	}
 }
+
+func TestUploadDir(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := filepath.Join(dir, "remote-root")
+	srcDir := filepath.Join(dir, "staging")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "nested", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "nested", "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "nested", "sub", "b.txt"), []byte("beta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	confPath := filepath.Join(dir, "rclone.conf")
+	client := NewClient("rclone", confPath)
+	ctx := context.Background()
+	if err := client.CreateRemote(ctx, "testrem", "alias", map[string]string{"remote": rootDir}); err != nil {
+		t.Fatalf("CreateRemote: %v", err)
+	}
+
+	if err := client.UploadDir(ctx, srcDir, "testrem", "uploads", 16, 32, ""); err != nil {
+		t.Fatalf("UploadDir failed: %v", err)
+	}
+
+	for rel, want := range map[string]string{
+		filepath.Join("uploads", "nested", "a.txt"):        "alpha",
+		filepath.Join("uploads", "nested", "sub", "b.txt"): "beta",
+	} {
+		got, err := os.ReadFile(filepath.Join(rootDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s content = %q, want %q", rel, string(got), want)
+		}
+	}
+}

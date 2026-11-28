@@ -95,8 +95,13 @@ func Load() (*Config, error) {
 			Timeout:           getEnv("RCLONE_DEFAULT_TIMEOUT", "5m"),
 			ConTimeout:        getEnv("RCLONE_DEFAULT_CONTIMEOUT", "1m"),
 			LogRetentionDays:  getEnvInt("RCLONE_LOG_RETENTION_DAYS", 30),
-			Timezone:          tz,
-			MaxConcurrentJobs: maxInt(1, getEnvInt("RCLONE_MAX_CONCURRENT_JOBS", 2)),
+			Timezone:             tz,
+			MaxConcurrentJobs:    maxInt(1, getEnvInt("RCLONE_MAX_CONCURRENT_JOBS", 2)),
+			UploadBatchTransfers: 16,
+			UploadBatchCheckers:  32,
+			UploadBatchMaxFiles:  80,
+			UploadBatchMaxMB:     64,
+			UploadSmallFileMaxMB: 16,
 		},
 	}
 

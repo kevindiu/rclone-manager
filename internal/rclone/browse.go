@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -272,6 +274,59 @@ func (c *Client) UploadFile(ctx context.Context, remote, subpath string, body io
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("upload failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
+	}
+	return nil
+}
+
+// UploadDir uploads all files inside localDir to remote:subpath in a single parallel `rclone copy` invocation.
+func (c *Client) UploadDir(ctx context.Context, localDir, remote, subpath string, transfers, checkers int, bwLimit string) error {
+	if err := c.ensureRemoteExists(ctx, remote); err != nil {
+		return err
+	}
+	cleanSub, err := CleanSubpath(subpath)
+	if err != nil {
+		return err
+	}
+	target, err := FormatRemoteTarget(remote, cleanSub)
+	if err != nil {
+		return err
+	}
+	if transfers <= 0 {
+		transfers = 16
+	} else if transfers > 64 {
+		transfers = 64
+	}
+	if checkers <= 0 {
+		checkers = 32
+	} else if checkers > 128 {
+		checkers = 128
+	}
+
+	args := []string{
+		"--config", c.confPath,
+		"copy",
+		localDir,
+		target,
+		"--transfers", strconv.Itoa(transfers),
+		"--checkers", strconv.Itoa(checkers),
+		"--no-traverse",
+	}
+	if cleanBw := strings.TrimSpace(bwLimit); cleanBw != "" {
+		args = append(args, "--bwlimit", cleanBw)
+	}
+
+	cmd := exec.CommandContext(ctx, c.bin, args...)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return cmd.Process.Signal(os.Interrupt)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 5 * time.Second
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("batch upload failed: %s", firstNonEmpty(strings.TrimSpace(string(out)), err.Error()))
 	}
 	return nil
 }

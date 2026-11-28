@@ -170,6 +170,21 @@ func validateSettingsFields(settings *domain.GlobalSettings) error {
 	if settings.WebhookType == "telegram" && (settings.TelegramBotToken != "" || settings.WebhookURL != "") && settings.TelegramChatID == "" {
 		return fmt.Errorf("%w: telegram_chat_id is required when webhook_type is telegram", ErrValidation)
 	}
+	if settings.UploadBatchTransfers != 0 && (settings.UploadBatchTransfers < 1 || settings.UploadBatchTransfers > 64) {
+		return fmt.Errorf("%w: upload_batch_transfers must be between 1 and 64", ErrValidation)
+	}
+	if settings.UploadBatchCheckers != 0 && (settings.UploadBatchCheckers < 1 || settings.UploadBatchCheckers > 128) {
+		return fmt.Errorf("%w: upload_batch_checkers must be between 1 and 128", ErrValidation)
+	}
+	if settings.UploadBatchMaxFiles != 0 && (settings.UploadBatchMaxFiles < 1 || settings.UploadBatchMaxFiles > 500) {
+		return fmt.Errorf("%w: upload_batch_max_files must be between 1 and 500", ErrValidation)
+	}
+	if settings.UploadBatchMaxMB != 0 && (settings.UploadBatchMaxMB < 1 || settings.UploadBatchMaxMB > 512) {
+		return fmt.Errorf("%w: upload_batch_max_mb must be between 1 and 512", ErrValidation)
+	}
+	if settings.UploadSmallFileMaxMB != 0 && (settings.UploadSmallFileMaxMB < 1 || settings.UploadSmallFileMaxMB > 256) {
+		return fmt.Errorf("%w: upload_small_file_max_mb must be between 1 and 256", ErrValidation)
+	}
 	return nil
 }
 

@@ -237,10 +237,27 @@ func TestUpdateSettingsAndImportBundleValidation(t *testing.T) {
 	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "Mars/Olympus"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected ErrValidation for bad timezone, got %v", err)
 	}
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{UploadBatchTransfers: 99}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation for upload_batch_transfers > 64, got %v", err)
+	}
+	if _, err := svc.UpdateSettings(ctx, domain.GlobalSettings{UploadBatchMaxMB: 1024}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation for upload_batch_max_mb > 512, got %v", err)
+	}
 
-	updated, err := svc.UpdateSettings(ctx, domain.GlobalSettings{Timezone: "Asia/Tokyo", MaxConcurrentJobs: 5})
+	updated, err := svc.UpdateSettings(ctx, domain.GlobalSettings{
+		Timezone:             "Asia/Tokyo",
+		MaxConcurrentJobs:    5,
+		UploadBatchTransfers: 24,
+		UploadBatchCheckers:  48,
+		UploadBatchMaxFiles:  120,
+		UploadBatchMaxMB:     128,
+		UploadSmallFileMaxMB: 32,
+	})
 	if err != nil {
 		t.Fatalf("UpdateSettings failed: %v", err)
+	}
+	if updated.UploadBatchTransfers != 24 || updated.UploadBatchMaxMB != 128 {
+		t.Fatalf("unexpected upload batch settings: %+v", updated)
 	}
 	if updated.Timezone != "Asia/Tokyo" || rn.maxConcurrent != 5 || sc.reloads != 1 {
 		t.Fatalf("unexpected side effects: updated=%+v maxConcurrent=%d reloads=%d", updated, rn.maxConcurrent, sc.reloads)

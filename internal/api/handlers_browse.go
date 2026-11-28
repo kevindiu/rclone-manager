@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -182,6 +183,172 @@ func (s *Server) handleBrowseUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeError(w, http.StatusBadRequest, "multipart field \"file\" is required")
+}
+
+const (
+	maxBatchUploadFiles = 500
+	maxBatchUploadBytes = 512 << 20
+)
+
+func (s *Server) handleBrowseUploadBatch(w http.ResponseWriter, r *http.Request) {
+	remote := strings.TrimSpace(r.URL.Query().Get("remote"))
+	dirPath := r.URL.Query().Get("path")
+	if remote == "" {
+		writeError(w, http.StatusBadRequest, "remote query parameter is required")
+		return
+	}
+
+	cleanDir, err := rclone.CleanSubpath(dirPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	transfers := 16
+	checkers := 32
+	maxFiles := 80
+	maxMB := 64
+	bwLimit := ""
+	if settings, setErr := s.svc.GetSettings(r.Context()); setErr == nil {
+		if settings.UploadBatchTransfers > 0 {
+			transfers = settings.UploadBatchTransfers
+		}
+		if settings.UploadBatchCheckers > 0 {
+			checkers = settings.UploadBatchCheckers
+		}
+		if settings.UploadBatchMaxFiles > 0 {
+			maxFiles = settings.UploadBatchMaxFiles
+		}
+		if settings.UploadBatchMaxMB > 0 {
+			maxMB = settings.UploadBatchMaxMB
+		}
+		bwLimit = settings.BwLimit
+	}
+	maxFiles = min(max(maxFiles, 1), maxBatchUploadFiles)
+	maxBytes := min(int64(max(maxMB, 1))<<20, maxBatchUploadBytes)
+
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "multipart form-data is required: "+err.Error())
+		return
+	}
+
+	tmpDir, err := os.MkdirTemp("", "rclone-upload-batch-*")
+	if err != nil {
+		s.writeInternalError(w, r, "create upload staging directory", err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	tmpPrefix := tmpDir + string(os.PathSeparator)
+	var pendingRelPath string
+	var totalBytes int64
+	uploadedCount := 0
+
+	for {
+		part, nextErr := mr.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			writeError(w, http.StatusBadRequest, "failed to read upload stream: "+nextErr.Error())
+			return
+		}
+
+		switch part.FormName() {
+		case "relpath":
+			rawRel, readErr := io.ReadAll(io.LimitReader(part, 4096))
+			_ = part.Close()
+			if readErr != nil {
+				writeError(w, http.StatusBadRequest, "failed to read relpath field")
+				return
+			}
+			pendingRelPath = strings.TrimSpace(string(rawRel))
+		case "file":
+			if uploadedCount >= maxFiles {
+				_ = part.Close()
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("batch upload exceeds %d files limit", maxFiles))
+				return
+			}
+
+			rel := pendingRelPath
+			pendingRelPath = ""
+			if rel == "" {
+				rel = part.FileName()
+			}
+			rel = strings.NewReplacer("\r", "", "\n", "").Replace(rel)
+			cleanRel, cleanErr := rclone.CleanSubpath(rel)
+			if cleanErr != nil || cleanRel == "" {
+				_ = part.Close()
+				writeError(w, http.StatusBadRequest, "invalid relative upload path")
+				return
+			}
+
+			destPath := filepath.Join(tmpDir, filepath.FromSlash(cleanRel))
+			if !strings.HasPrefix(destPath, tmpPrefix) {
+				_ = part.Close()
+				writeError(w, http.StatusBadRequest, "invalid relative upload path")
+				return
+			}
+			if mkErr := os.MkdirAll(filepath.Dir(destPath), 0o700); mkErr != nil {
+				_ = part.Close()
+				s.writeInternalError(w, r, "create upload staging subdirectory", mkErr)
+				return
+			}
+
+			dst, openErr := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+			if openErr != nil {
+				_ = part.Close()
+				s.writeInternalError(w, r, "create upload staging file", openErr)
+				return
+			}
+
+			remaining := maxBytes - totalBytes
+			n, copyErr := io.Copy(dst, io.LimitReader(part, remaining+1))
+			closeDstErr := dst.Close()
+			_ = part.Close()
+			if copyErr != nil {
+				writeError(w, http.StatusBadRequest, "failed to stream uploaded file: "+copyErr.Error())
+				return
+			}
+			if closeDstErr != nil {
+				s.writeInternalError(w, r, "close upload staging file", closeDstErr)
+				return
+			}
+			totalBytes += n
+			if totalBytes > maxBytes {
+				writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("batch upload exceeds %d MiB limit", maxBytes>>20))
+				return
+			}
+			uploadedCount++
+		default:
+			_ = part.Close()
+		}
+	}
+
+	if uploadedCount == 0 {
+		writeError(w, http.StatusBadRequest, "at least one file is required")
+		return
+	}
+
+	if uploadErr := s.client.UploadDir(r.Context(), tmpDir, remote, cleanDir, transfers, checkers, bwLimit); uploadErr != nil {
+		status := http.StatusBadRequest
+		if errors.Is(uploadErr, rclone.ErrRemoteNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, uploadErr.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"status": "uploaded",
+		"count":  uploadedCount,
+		"path":   cleanDir,
+	})
 }
 
 func (s *Server) handleBrowseRename(w http.ResponseWriter, r *http.Request) {

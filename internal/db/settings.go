@@ -44,6 +44,7 @@ func (s *Store) SaveSettings(ctx context.Context, settings domain.GlobalSettings
 	if settings.LogRetentionDays < 0 {
 		settings.LogRetentionDays = 0
 	}
+	fillUploadBatchDefaults(&settings, domain.GlobalSettings{})
 	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)
 	settings.WebhookOn = strings.ToLower(strings.TrimSpace(settings.WebhookOn))
 	if settings.WebhookOn == "" {
@@ -86,6 +87,7 @@ func normalizeSettings(s *domain.GlobalSettings, defaults domain.GlobalSettings)
 	if s.ConTimeout == "" {
 		s.ConTimeout = defaults.ConTimeout
 	}
+	fillUploadBatchDefaults(s, defaults)
 	s.WebhookURL = strings.TrimSpace(s.WebhookURL)
 	s.WebhookOn = strings.ToLower(strings.TrimSpace(s.WebhookOn))
 	if s.WebhookOn == "" {
@@ -97,4 +99,37 @@ func normalizeSettings(s *domain.GlobalSettings, defaults domain.GlobalSettings)
 	}
 	s.TelegramBotToken = strings.TrimSpace(s.TelegramBotToken)
 	s.TelegramChatID = strings.TrimSpace(s.TelegramChatID)
+}
+
+func fillUploadBatchDefaults(s *domain.GlobalSettings, defaults domain.GlobalSettings) {
+	if s.UploadBatchTransfers <= 0 {
+		s.UploadBatchTransfers = max(defaults.UploadBatchTransfers, 0)
+		if s.UploadBatchTransfers == 0 {
+			s.UploadBatchTransfers = 16
+		}
+	}
+	if s.UploadBatchCheckers <= 0 {
+		s.UploadBatchCheckers = max(defaults.UploadBatchCheckers, 0)
+		if s.UploadBatchCheckers == 0 {
+			s.UploadBatchCheckers = 32
+		}
+	}
+	if s.UploadBatchMaxFiles <= 0 {
+		s.UploadBatchMaxFiles = max(defaults.UploadBatchMaxFiles, 0)
+		if s.UploadBatchMaxFiles == 0 {
+			s.UploadBatchMaxFiles = 80
+		}
+	}
+	if s.UploadBatchMaxMB <= 0 {
+		s.UploadBatchMaxMB = max(defaults.UploadBatchMaxMB, 0)
+		if s.UploadBatchMaxMB == 0 {
+			s.UploadBatchMaxMB = 64
+		}
+	}
+	if s.UploadSmallFileMaxMB <= 0 {
+		s.UploadSmallFileMaxMB = max(defaults.UploadSmallFileMaxMB, 0)
+		if s.UploadSmallFileMaxMB == 0 {
+			s.UploadSmallFileMaxMB = 16
+		}
+	}
 }

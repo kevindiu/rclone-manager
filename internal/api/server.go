@@ -145,6 +145,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/browse/size", s.handleBrowseSize)
 	s.mux.HandleFunc("POST /api/browse/mkdir", s.handleBrowseMkdir)
 	s.mux.HandleFunc("POST /api/browse/upload", s.handleBrowseUpload)
+	s.mux.HandleFunc("POST /api/browse/upload-batch", s.handleBrowseUploadBatch)
 	s.mux.HandleFunc("POST /api/browse/rename", s.handleBrowseRename)
 	s.mux.HandleFunc("DELETE /api/browse/entry", s.handleBrowseDelete)
 	s.mux.HandleFunc("POST /api/browse/bulk-delete", s.handleBrowseBulkDelete)

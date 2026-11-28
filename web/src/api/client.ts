@@ -316,6 +316,26 @@ export const api = {
       }
     );
   },
+  browseUploadBatch: (
+    remote: string,
+    dirPath: string,
+    items: Array<{ file: File; relPath: string }>,
+    signal?: AbortSignal
+  ) => {
+    const fd = new FormData();
+    for (const item of items) {
+      fd.append('relpath', item.relPath);
+      fd.append('file', item.file, item.file.name);
+    }
+    return request<{ status: string; count: number; path: string }>(
+      `/api/browse/upload-batch?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(dirPath)}`,
+      {
+        method: 'POST',
+        body: fd,
+        signal,
+      }
+    );
+  },
   browseRename: (remote: string, path: string, new_name: string) =>
     request<{ status: string; path: string }>('/api/browse/rename', {
       method: 'POST',

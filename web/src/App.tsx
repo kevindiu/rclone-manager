@@ -380,6 +380,7 @@ export function App() {
               remotes={remotes}
               jobs={jobs}
               activeRuns={activeRuns}
+              settings={settings}
               initialRemote={browseRemote}
               onNavigate={navigate}
               onViewActiveLogs={openActiveRunLogs}

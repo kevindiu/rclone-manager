@@ -1,8 +1,17 @@
 export interface QueuedUpload {
   file: File;
   dirPath: string;
+  relPath: string;
   displayPath: string;
 }
+
+export const BATCH_SMALL_FILE_MAX_BYTES = 16 * 1024 * 1024;
+export const BATCH_MAX_FILES = 80;
+export const BATCH_MAX_BYTES = 64 * 1024 * 1024;
+
+export type UploadWorkItem =
+  | { kind: 'single'; item: QueuedUpload }
+  | { kind: 'batch'; items: QueuedUpload[] };
 
 interface DropFileSystemEntry {
   isFile: boolean;
@@ -53,11 +62,13 @@ export function buildUploadQueueFromFileList(
   baseSubpath: string
 ): QueuedUpload[] {
   return Array.from(files).map((file) => {
-    const relPath = file.webkitRelativePath || '';
+    const webkitRel = file.webkitRelativePath || '';
+    const relPath = cleanPathSegments(webkitRel || file.name).join('/') || file.name;
     return {
       file,
-      dirPath: resolveUploadDir(baseSubpath, relPath),
-      displayPath: relPath || file.name,
+      dirPath: resolveUploadDir(baseSubpath, webkitRel),
+      relPath,
+      displayPath: webkitRel || file.name,
     };
   });
 }
@@ -107,6 +118,7 @@ async function traverseDropEntry(
     files.push({
       file,
       dirPath: resolveUploadDir(baseSubpath, displayPath),
+      relPath: displayPath,
       displayPath,
     });
     return;
@@ -162,4 +174,57 @@ export async function collectDroppedEntries(
     await traverseDropEntry(entry, [], baseSubpath, files, emptyDirs);
   }
   return { files, emptyDirs };
+}
+
+/**
+ * Splits queued uploads into multi-file batches for small files and direct single streams for large/solo files.
+ */
+export function partitionUploadBatches(
+  queue: QueuedUpload[],
+  opts: { smallFileMaxBytes?: number; maxFiles?: number; maxBytes?: number } = {}
+): UploadWorkItem[] {
+  if (queue.length <= 1) {
+    return queue.map((item) => ({ kind: 'single', item }));
+  }
+
+  const smallFileMaxBytes = opts.smallFileMaxBytes ?? BATCH_SMALL_FILE_MAX_BYTES;
+  const maxFiles = Math.max(1, opts.maxFiles ?? BATCH_MAX_FILES);
+  const maxBytes = Math.max(1, opts.maxBytes ?? BATCH_MAX_BYTES);
+
+  const workItems: UploadWorkItem[] = [];
+  const largeItems: QueuedUpload[] = [];
+  let currentBatch: QueuedUpload[] = [];
+  let currentBytes = 0;
+
+  const flushBatch = () => {
+    if (currentBatch.length === 0) return;
+    if (currentBatch.length === 1) {
+      workItems.push({ kind: 'single', item: currentBatch[0] });
+    } else {
+      workItems.push({ kind: 'batch', items: currentBatch });
+    }
+    currentBatch = [];
+    currentBytes = 0;
+  };
+
+  for (const item of queue) {
+    if (item.file.size > smallFileMaxBytes) {
+      largeItems.push(item);
+      continue;
+    }
+    if (
+      currentBatch.length > 0 &&
+      (currentBatch.length >= maxFiles || currentBytes + item.file.size > maxBytes)
+    ) {
+      flushBatch();
+    }
+    currentBatch.push(item);
+    currentBytes += item.file.size;
+  }
+  flushBatch();
+
+  for (const item of largeItems) {
+    workItems.push({ kind: 'single', item });
+  }
+  return workItems;
 }

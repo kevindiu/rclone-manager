@@ -9,6 +9,11 @@ export interface GlobalSettings {
   log_retention_days: number;
   timezone: string;
   max_concurrent_jobs: number;
+  upload_batch_transfers?: number;
+  upload_batch_checkers?: number;
+  upload_batch_max_files?: number;
+  upload_batch_max_mb?: number;
+  upload_small_file_max_mb?: number;
   webhook_url?: string;
   webhook_on?: 'off' | 'failure' | 'always' | '';
   webhook_type?: 'generic' | 'ntfy' | 'telegram' | '';

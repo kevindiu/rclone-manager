@@ -13,8 +13,13 @@ type GlobalSettings struct {
 	ConTimeout        string `json:"contimeout" yaml:"contimeout"`
 	LogRetentionDays  int    `json:"log_retention_days" yaml:"log_retention_days"`
 	Timezone          string `json:"timezone" yaml:"timezone"`
-	MaxConcurrentJobs int    `json:"max_concurrent_jobs" yaml:"max_concurrent_jobs"`
-	WebhookURL        string `json:"webhook_url,omitempty" yaml:"webhook_url,omitempty"`
+	MaxConcurrentJobs    int    `json:"max_concurrent_jobs" yaml:"max_concurrent_jobs"`
+	UploadBatchTransfers int    `json:"upload_batch_transfers,omitempty" yaml:"upload_batch_transfers,omitempty"`
+	UploadBatchCheckers  int    `json:"upload_batch_checkers,omitempty" yaml:"upload_batch_checkers,omitempty"`
+	UploadBatchMaxFiles  int    `json:"upload_batch_max_files,omitempty" yaml:"upload_batch_max_files,omitempty"`
+	UploadBatchMaxMB     int    `json:"upload_batch_max_mb,omitempty" yaml:"upload_batch_max_mb,omitempty"`
+	UploadSmallFileMaxMB int    `json:"upload_small_file_max_mb,omitempty" yaml:"upload_small_file_max_mb,omitempty"`
+	WebhookURL           string `json:"webhook_url,omitempty" yaml:"webhook_url,omitempty"`
 	WebhookOn         string `json:"webhook_on,omitempty" yaml:"webhook_on,omitempty"`     // "failure" | "always" | "off"
 	WebhookType       string `json:"webhook_type,omitempty" yaml:"webhook_type,omitempty"` // "generic" | "ntfy" | "telegram"
 	TelegramBotToken  string `json:"telegram_bot_token,omitempty" yaml:"telegram_bot_token,omitempty"`

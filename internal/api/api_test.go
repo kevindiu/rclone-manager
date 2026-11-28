@@ -1351,3 +1351,95 @@ func TestFullEncryptedBackupRoundTrip(t *testing.T) {
 		t.Fatalf("expected restored job BackupJob, got %+v", jobs)
 	}
 }
+
+func TestAPIBrowseUploadBatch(t *testing.T) {
+	_, ts, dir := setupTestServer(t)
+	client := setupAuthenticatedClient(t, ts)
+
+	remoteRoot := filepath.Join(dir, "batch-root")
+	if err := os.MkdirAll(remoteRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	remBody, _ := json.Marshal(map[string]any{
+		"name":   "batchrem",
+		"type":   "alias",
+		"params": map[string]string{"remote": remoteRoot},
+	})
+	remResp, err := client.Post(ts.URL+"/api/remotes", "application/json", bytes.NewReader(remBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = remResp.Body.Close()
+	if remResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create remote status = %d", remResp.StatusCode)
+	}
+
+	// Valid multi-file nested batch upload
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for _, entry := range []struct {
+		rel  string
+		name string
+		body string
+	}{
+		{rel: "dir/a.txt", name: "a.txt", body: "hello-a"},
+		{rel: "dir/sub/b.txt", name: "b.txt", body: "hello-b"},
+	} {
+		if err := mw.WriteField("relpath", entry.rel); err != nil {
+			t.Fatal(err)
+		}
+		fw, err := mw.CreateFormFile("file", entry.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write([]byte(entry.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = mw.Close()
+
+	resp, err := client.Post(ts.URL+"/api/browse/upload-batch?remote=batchrem&path=target", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uploadRes struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+		Path   string `json:"path"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&uploadRes)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated || uploadRes.Count != 2 || uploadRes.Path != "target" {
+		t.Fatalf("unexpected upload-batch response: status=%d res=%+v", resp.StatusCode, uploadRes)
+	}
+
+	for rel, want := range map[string]string{
+		filepath.Join("target", "dir", "a.txt"):        "hello-a",
+		filepath.Join("target", "dir", "sub", "b.txt"): "hello-b",
+	} {
+		got, err := os.ReadFile(filepath.Join(remoteRoot, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s content = %q, want %q", rel, string(got), want)
+		}
+	}
+
+	// Path traversal attempt must return 400
+	var badBuf bytes.Buffer
+	badMW := multipart.NewWriter(&badBuf)
+	_ = badMW.WriteField("relpath", "../escape.txt")
+	fw, _ := badMW.CreateFormFile("file", "escape.txt")
+	_, _ = fw.Write([]byte("evil"))
+	_ = badMW.Close()
+
+	badResp, err := client.Post(ts.URL+"/api/browse/upload-batch?remote=batchrem&path=target", badMW.FormDataContentType(), &badBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = badResp.Body.Close()
+	if badResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("traversal relpath status = %d, want 400", badResp.StatusCode)
+	}
+}
